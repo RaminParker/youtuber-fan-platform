@@ -74,7 +74,7 @@ Technically (manifest §7): a **modular monolith** in Python with one shared pip
 Technical definition of done for the MVP (each milestone in §17 has its own, narrower criteria):
 
 - [x] `uv run pytest` is green and `uv run ruff check` / `uv run ruff format --check` report nothing.
-- [ ] `docker compose up` starts web, worker, Postgres and the LLM gateway locally; `git push` deploys to Render without manual steps (manifest §7.1 "one command to deploy").
+- [ ] `docker compose up` starts web, worker, Postgres and the LLM gateway locally (**done**, verified 2026-09-12, gateway included); `git push` deploys to Render without manual steps (manifest §7.1 "one command to deploy") — open, the Blueprint has never been applied.
 - [ ] A new public upload on the pilot channel is detected by the feed poll, transcribed, summarised, scheduled, sentiment-enriched, previewed to the creator with a full stop window, and sent to all confirmed subscribers **exactly once**, without any manual step (manifest §1.5, §7.9).
 - [ ] Every mail carries the two "fingerprints" (creator header, platform footer with the "automatisch erstellt" notice), an unsubscribe link, `List-Unsubscribe` headers and an "online ansehen" link; the online page carries the same notice (manifest §3.1, §7.6).
 - [ ] Bounces and complaints reported by Resend deactivate the affected subscriber automatically (manifest §6.1).
@@ -665,7 +665,7 @@ open until it has been run against one, however green the tests are.
 - [x] `README.md` (German) updated, `docs/ARCHITECTURE.md` skeleton with the Decisions section.
 - [ ] **External setup started now because of lead times:** Google Cloud project, YouTube Data API key, OAuth client (web), consent screen with `youtube.force-ssl`; domain decision; Resend account + sending subdomain; Render account; Webshare residential proxy account.
 - **Done when:** `docker compose up` serves `/health`, CI is green with the tests above.
-- **Status: done, 2026-09-11.** `docker compose up` serves `/health` with a real `SELECT 1`; `alembic upgrade head` and `downgrade base` both verified against PostgreSQL 17. The external-setup box stays open: the LLM-provider and Resend accounts exist, the Google Cloud project, the YouTube API key, the domain, the Render account and the Webshare proxy do not. CI has not run yet — the repository has no commit on this branch.
+- **Status: done, 2026-09-11.** `docker compose up` serves `/health` with a real `SELECT 1`; `alembic upgrade head` and `downgrade base` both verified against PostgreSQL 17. The external-setup box stays open: the LLM-provider and Resend accounts exist, the Google Cloud project, the YouTube API key, the domain, the Render account and the Webshare proxy do not. CI is green: the first run after the push finished in 37 s — `uv sync --locked`, both ruff checks and the full suite against a PostgreSQL service container.
 
 ### M1 — YouTube source and feed poll (≈ 2 sessions)
 - [x] `sources/base.py`, `sources/youtube/data_api.py` (videos.list, channels.list, playlistItems.list, commentThreads.list; `QUOTA_UNITS` log), `feed.py`, `connector.py`.
