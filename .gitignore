@@ -18,5 +18,7 @@ node_modules/
 .env.*
 !.env.example
 
-# Logs
+# Logs und lokale Ausgaben
 *.log
+logs/
+out/
