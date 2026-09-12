@@ -1,0 +1,73 @@
+# Local development: `docker compose up` starts everything (manifest §7.1).
+# Web and worker are built from the same Dockerfile that runs in production.
+
+name: creator-platform
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-test-db.sh:/docker-entrypoint-initdb.d/init-test-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bifrost:
+    image: maximhq/bifrost:v2.1.1
+    environment:
+      APP_PORT: 8080
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LLM_GATEWAY_KEY: ${LLM_GATEWAY_KEY}
+      BIFROST_SETUP_TOKEN: ${BIFROST_SETUP_TOKEN}
+    ports:
+      - "8080:8080"
+    volumes:
+      - bifrost-data:/app/data
+      - ./config/bifrost.json:/app/data/config.json:ro
+
+  web:
+    build: .
+    command: uv run uvicorn app.web.server:create_app --factory --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
+      LLM_GATEWAY_URL: http://bifrost:8080
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: uv run python -m app.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
+      LLM_GATEWAY_URL: http://bifrost:8080
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  bifrost-data:

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://app:app@localhost:5432/app_test
+      DATABASE_URL_TEST: postgresql+psycopg://app:app@localhost:5432/app_test
+      SECRET_KEY: ci-secret-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --locked, so a lockfile that drifted from pyproject.toml fails here
+      # rather than in a container three weeks from now.
+      - run: uv sync --locked
+
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pytest

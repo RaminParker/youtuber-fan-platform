@@ -1,0 +1,16 @@
+{# Rendered only when a sentiment exists. A video with comments switched off, or
+   one whose comments were all filtered away, simply shows no box — the feature
+   degrades instead of the mail looking broken. #}
+<div class="sentiment">
+  <h2>Wie die Community reagiert hat</h2>
+  <p>{{ sentiment.overall }}</p>
+  {% if sentiment.agreed %}
+    <p><strong>Kam an:</strong> {{ sentiment.agreed | join(" · ") }}</p>
+  {% endif %}
+  {% if sentiment.disagreed %}
+    <p><strong>Widerspruch:</strong> {{ sentiment.disagreed | join(" · ") }}</p>
+  {% endif %}
+  {% if sentiment.questions %}
+    <p><strong>Offene Fragen:</strong> {{ sentiment.questions | join(" · ") }}</p>
+  {% endif %}
+</div>

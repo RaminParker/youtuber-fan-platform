@@ -1,0 +1,34 @@
+{% extends "pages/base.html" %}
+{% block title %}{{ product.name }} — die Zusammenfassung für deine Community{% endblock %}
+{% block content %}
+  <h1>Deine Fans bekommen mehr von dir. Du machst nichts dafür.</h1>
+  <p>Ein paar Tage nach jedem Video bekommen die Fans deines Kanals eine kurze,
+  sachliche Zusammenfassung per Mail — mit Sprungmarken ins Video und einem Bild
+  davon, wie die Community reagiert hat. Du bekommst eine eigene E-Mail-Liste,
+  die dir gehört.</p>
+
+  <h2>Wie es läuft</h2>
+  <ol>
+    <li><strong>Einmal einrichten.</strong> Ein Gespräch, ein Link in deiner
+    Videobeschreibung. Mehr nicht.</li>
+    <li><strong>Wir machen den Rest.</strong> Neues Video erkannt, zusammengefasst,
+    Kommentare ausgewertet, Mail geplant.</li>
+    <li><strong>Du behältst die Kontrolle.</strong> Eine Stunde vor jedem Versand
+    bekommst du die fertige Mail. Ein Klick stoppt sie.</li>
+  </ol>
+
+  <h2>So sieht die Mail aus</h2>
+  {% include "partials/example_mail.html" %}
+
+  <h2>Warum mit Verzug?</h2>
+  <p>Damit niemand auf die Zusammenfassung wartet, statt das Video zu sehen.
+  Standard sind sieben Tage, mindestens 48 Stunden — du stellst es selbst ein.
+  Für Fans, die das Video verpasst haben, ist die Mail die zweite Chance.</p>
+
+  <p><a class="button" href="mailto:{{ support_email }}">Gespräch vereinbaren</a></p>
+
+  <footer class="platform">
+    <a href="{{ base_url }}/impressum">Impressum</a> ·
+    <a href="{{ base_url }}/datenschutz">Datenschutz</a>
+  </footer>
+{% endblock %}

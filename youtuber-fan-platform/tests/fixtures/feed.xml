@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=UCpilot0000000000000000"/>
+  <id>yt:channel:pilot0000000000000000</id>
+  <!-- Deliberately without the UC prefix: that is what YouTube really sends. -->
+  <yt:channelId>pilot0000000000000000</yt:channelId>
+  <title>Pilotkanal</title>
+  <author>
+    <name>Pilotkanal</name>
+    <uri>https://www.youtube.com/channel/UCpilot0000000000000000</uri>
+  </author>
+  <published>2019-03-14T09:12:00+00:00</published>
+
+  <entry>
+    <id>yt:video:aaaaaaaaaaa</id>
+    <yt:videoId>aaaaaaaaaaa</yt:videoId>
+    <yt:channelId>UCpilot0000000000000000</yt:channelId>
+    <title>Warum Verwaltung so langsam ist</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=aaaaaaaaaaa"/>
+    <author><name>Pilotkanal</name></author>
+    <published>2026-09-08T16:00:03+00:00</published>
+    <updated>2026-09-09T08:11:47+00:00</updated>
+    <media:group>
+      <media:title>Warum Verwaltung so langsam ist</media:title>
+      <media:community><media:statistics views="48213"/></media:community>
+    </media:group>
+  </entry>
+
+  <!-- A Short. The feed does not say so; only the duration from the Data API does. -->
+  <entry>
+    <id>yt:video:bbbbbbbbbbb</id>
+    <yt:videoId>bbbbbbbbbbb</yt:videoId>
+    <yt:channelId>UCpilot0000000000000000</yt:channelId>
+    <title>In 40 Sekunden erklärt</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=bbbbbbbbbbb"/>
+    <author><name>Pilotkanal</name></author>
+    <published>2026-09-05T11:30:00+00:00</published>
+    <updated>2026-09-05T11:45:00+00:00</updated>
+  </entry>
+
+  <!-- Published long before the pilot was onboarded: back catalogue. -->
+  <entry>
+    <id>yt:video:ccccccccccc</id>
+    <yt:videoId>ccccccccccc</yt:videoId>
+    <yt:channelId>UCpilot0000000000000000</yt:channelId>
+    <title>Das Interview, über das alle reden</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=ccccccccccc"/>
+    <author><name>Pilotkanal</name></author>
+    <published>2025-11-02T18:00:00+00:00</published>
+    <updated>2025-11-03T09:00:00+00:00</updated>
+  </entry>
+
+  <!-- Malformed on purpose: no yt:videoId. Must be skipped, not fatal. -->
+  <entry>
+    <id>yt:video:broken</id>
+    <title>Kaputter Eintrag</title>
+    <published>2026-09-01T00:00:00+00:00</published>
+  </entry>
+</feed>

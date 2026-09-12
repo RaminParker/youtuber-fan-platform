@@ -1,0 +1,76 @@
+# The one configuration file (manifest §7.1). Everything tunable lives here.
+#
+# Rules:
+#   - No secrets. Those come from environment variables only; see .env.example.
+#   - Values that never change are module constants next to their single use,
+#     not keys in this file.
+#   - Per-creator values (delay, minimum length, variant, branding, reply-to)
+#     live in the database and override the defaults below.
+#   - Any table key can be overridden by an environment variable using a double
+#     underscore, e.g. LOGGING__JSON=true.
+
+[product]
+name = "Klartext"          # the ONE place the product name lives (manifest §0)
+domain = "klartext.tld"    # placeholder until decided (manifest §15); base URL,
+                           # mail subdomain and mailboxes all derive from it
+timezone = "Europe/Berlin"
+
+[schedule]                              # manifest §3.1 "Zeitversatz", §7.6
+default_delay_hours = 168               # 7 days after publication
+min_delay_hours = 48                    # the original keeps its head start
+max_delay_hours = 720                   # 30 days; also caps "verschieben"
+sentiment_lead_hours = 2                # comments are fetched at T-2h
+stop_window_minutes = 60                # creator preview at T-1h; never shortened
+postpone_hours = 24                     # what the "verschieben" link adds
+
+[content]
+min_duration_seconds = 300              # 5 minutes; skips shorts and trailers
+backfill_count = 5                      # manifest §6.1; `cli backfill --count` overrides
+max_transcript_chars = 400000           # ~10 h of speech; above this: skip + notify
+transcript_languages = ["de", "en"]     # preference order for caption tracks
+
+[comments]                              # manifest §3.1 feature 2
+max_count = 300
+min_words = 5
+drop_with_links = true
+drop_channel_owner = true
+
+[llm]                                   # manifest §8
+model_summary = "anthropic/claude-sonnet-4-5"    # provider/model as the gateway addresses it
+model_sentiment = "anthropic/claude-sonnet-4-5"
+max_output_tokens = 4000
+timeout_seconds = 120
+daily_cost_cap_cents = 500              # per creator per day (manifest §7.9)
+summary_prompt_version = "v1"
+sentiment_prompt_version = "v1"
+
+# Every model named above must have an entry here, or start-up fails: a model
+# swap would otherwise book cost 0 and silently bypass the daily cap.
+[llm.prices_per_million_tokens]
+"anthropic/claude-sonnet-4-5" = { input = 3.00, output = 15.00 }
+
+[email]                                 # manifest §7.6
+variants = ["compact", "detailed", "teaser"]
+default_variant = "compact"
+confirm_token_days = 7                  # unconfirmed sign-ups are deleted after this
+unsubscribed_retention_days = 30        # unsubscribed rows are deleted after this
+magic_link_minutes = 15
+session_hours = 24
+max_custom_text_chars = 300             # greeting / farewell
+
+[web]
+rate_limit_signup = "20/minute"         # per IP; deliberately loose, many fans
+                                        # share one mobile-carrier NAT address
+rate_limit_magic_link = "3/minute"
+rate_limit_contact = "3/minute"
+confirm_resend_minutes = 10             # per e-mail address: at most one confirm
+                                        # mail per address in this window
+
+[worker]
+loop_seconds = 60                       # how often the worker looks for due steps
+feed_poll_hours = 6                     # upload detection latency
+
+[logging]
+level = "INFO"
+json = false                            # true in production (LOGGING__JSON=true)
+file = ""                               # e.g. "logs/app.log"; empty = stdout only

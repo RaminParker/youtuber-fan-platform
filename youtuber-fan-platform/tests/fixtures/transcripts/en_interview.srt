@@ -1,0 +1,27 @@
+1
+00:00:00,000 --> 00:00:08,000
+Thanks for coming on. You've spent fifteen years building things that most people never see.
+
+2
+00:00:08,000 --> 00:00:16,000
+That's one way of putting it. Infrastructure is only visible when it breaks.
+
+3
+00:01:30,000 --> 00:01:45,000
+So what actually changed? Honestly, the hardest part was never the technology. It was convincing people to delete things.
+
+4
+00:03:12,000 --> 00:03:30,000
+We had a system nobody understood, and everybody was afraid to touch. So it grew. Fear is a growth strategy for software.
+
+5
+00:06:45,000 --> 00:07:05,000
+I'd say the single best decision we made was writing down why we did things, not just what we did.
+
+6
+00:11:20,000 --> 00:11:40,000
+Do I regret it? Some of it. We optimised for a scale that never arrived, and we paid for that every single week.
+
+7
+00:16:00,000 --> 00:16:22,000
+If I could tell my younger self one thing, it would be this: the boring solution is usually the one still running in ten years.

@@ -1,0 +1,126 @@
+/* Handwritten, no build step. One font family, one accent colour, real labels.
+   The accent comes from the creator on fan pages and from us everywhere else. */
+
+:root {
+  --accent: #333333;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --bg: #ffffff;
+  --rule: #e3e3e3;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.page {
+  max-width: 38rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+}
+
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 0.75rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 0.5rem; }
+p { margin: 0.75rem 0; }
+a { color: var(--accent); }
+
+label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
+
+input[type="email"], input[type="text"], input[type="url"], select, textarea {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font: inherit;
+}
+
+input:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  padding: 0.7rem 1.4rem;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.muted { color: var(--muted); font-size: 0.9rem; }
+
+footer.platform {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* --- Creator branding on fan pages ------------------------------------- */
+
+header.creator {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 3px solid var(--accent);
+}
+
+header.creator img { border-radius: 50%; }
+
+/* --- Summary ------------------------------------------------------------ */
+
+blockquote {
+  margin: 1.5rem 0;
+  padding: 0.5rem 0 0.5rem 1rem;
+  border-left: 3px solid var(--accent);
+  font-size: 1.05rem;
+}
+
+.sentiment {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  background: #f6f4f0;
+  border-radius: 8px;
+}
+
+.sentiment h2 { margin-top: 0; font-size: 1rem; }
+
+/* --- Landing page ------------------------------------------------------- */
+
+.example-mail {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin: 1rem 0 2rem;
+  background: #fff;
+}
+
+.example-header {
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--accent);
+}
+
+.example-mail h3 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+
+ol { padding-left: 1.25rem; }
+ol li { margin: 0.5rem 0; }
+
+a.button { display: inline-block; text-decoration: none; color: #fff; }
+
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #ece8e1; --bg: #17161200; --rule: #34312b; }
+  body { background: #171612; }
+  .sentiment, .example-mail { background: #201e19; }
+}

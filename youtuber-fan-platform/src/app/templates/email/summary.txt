@@ -1,0 +1,35 @@
+{% if preview %}VORSCHAU FÜR {{ creator.name | upper }} — so sehen deine Abonnenten die Mail.
+Sie geht um {{ send_at | local_datetime }} raus.
+
+Stoppen:     {{ base_url }}/m/{{ stop_token }}/stoppen
+Verschieben: {{ base_url }}/m/{{ stop_token }}/verschieben
+
+{% endif %}{% if creator.greeting_text %}{{ creator.greeting_text }}
+
+{% endif %}{{ summary.headline }}
+
+{{ summary.core_message }}
+
+{% for point in summary.key_points -%}
+* {{ point.text }}{% if point.timestamp_seconds is not none %} — {{ jump(point.timestamp_seconds) }}{% endif %}
+{% endfor %}
+{% if summary.quote %}„{{ summary.quote }}"{% if summary.quote_timestamp_seconds is not none %}
+{{ jump(summary.quote_timestamp_seconds) }}{% endif %}
+
+{% endif %}{% if sentiment %}WIE DIE COMMUNITY REAGIERT HAT
+
+{{ sentiment.overall }}
+{% if sentiment.agreed %}Kam an: {{ sentiment.agreed | join(" · ") }}
+{% endif %}{% if sentiment.disagreed %}Widerspruch: {{ sentiment.disagreed | join(" · ") }}
+{% endif %}{% if sentiment.questions %}Offene Fragen: {{ sentiment.questions | join(" · ") }}
+{% endif %}
+{% endif %}Video ansehen: {{ appearance.url }}
+Online ansehen: {{ view_url }}
+{% if creator.farewell_text %}
+{{ creator.farewell_text }}
+{% endif %}
+--
+{% if subscription %}Du bekommst diese Mail, weil du dich{% if subscription.confirmed_at %} am {{ subscription.confirmed_at | local_date }}{% endif %} über {{ base_url }}/k/{{ creator.slug }} für die Zusammenfassungen von {{ creator.name }} eingetragen hast.
+Abmelden: {{ base_url }}/abmelden/{{ subscription.unsubscribe_token }}
+{% endif %}Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
+Impressum: {{ base_url }}/impressum · Datenschutz: {{ base_url }}/datenschutz

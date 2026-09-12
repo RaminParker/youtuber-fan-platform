@@ -1,0 +1,15 @@
+Dein Anmeldelink
+
+Öffne diesen Link, um zu deinen Einstellungen zu kommen:
+
+{{ link }}
+
+Der Link gilt {{ settings.email.magic_link_minutes }} Minuten und funktioniert einmal.
+
+Du hast keine Anmeldung angefordert? Dann ignoriere diese Mail einfach — ohne
+den Link passiert nichts.
+
+--
+Du bekommst diese Nachricht, weil jemand eine Anmeldung für {{ creator.contact_email }}
+angefordert hat.
+Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.

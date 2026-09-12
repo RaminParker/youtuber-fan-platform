@@ -1,0 +1,46 @@
+{
+  "providers": {
+    "anthropic": {
+      "keys": [
+        {
+          "value": "env.ANTHROPIC_API_KEY",
+          "models": [
+            "claude-sonnet-4-5"
+          ],
+          "weight": 1
+        }
+      ]
+    }
+  },
+  "governance": {
+    "virtual_keys": [
+      {
+        "name": "app",
+        "value": "env.LLM_GATEWAY_KEY",
+        "is_active": true,
+        "provider_configs": [
+          {
+            "provider": "anthropic",
+            "allowed_models": [
+              "claude-sonnet-4-5"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "client": {
+    "enforce_auth_on_inference": true,
+    "disable_db_pings_in_health": true
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/app/data/config.db"
+    }
+  },
+  "logs_store": {
+    "enabled": false
+  }
+}

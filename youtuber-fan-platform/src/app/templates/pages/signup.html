@@ -1,0 +1,30 @@
+{% extends "pages/base.html" %}
+{% block title %}Zusammenfassungen von {{ creator.name }}{% endblock %}
+{% block content %}
+  <header class="creator">
+    {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="56" height="56">{% endif %}
+    <div><strong>{{ creator.name }}</strong></div>
+  </header>
+
+  <h1>Die Zusammenfassung per Mail</h1>
+  <p>Ein paar Tage nach jedem neuen Video bekommst du eine kurze Zusammenfassung
+  davon, was gesagt wurde — mit Sprungmarken ins Video und einem Bild davon, wie
+  die Community reagiert hat.</p>
+  <p>Eine Mail pro Video. Keine Werbung. Abmelden mit einem Klick.</p>
+
+  <form method="post" action="/k/{{ creator.slug }}">
+    <label for="email">Deine E-Mail-Adresse</label>
+    <input type="email" id="email" name="email" required autocomplete="email"
+           autocapitalize="off" spellcheck="false">
+    <p><button type="submit">Eintragen</button></p>
+  </form>
+
+  <p class="muted">Wir schicken dir zuerst eine Bestätigungsmail. Erst wenn du darauf
+  klickst, bist du dabei.</p>
+
+  <footer class="platform">
+    Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
+    <a href="{{ base_url }}/impressum">Impressum</a> ·
+    <a href="{{ base_url }}/datenschutz">Datenschutz</a>
+  </footer>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "pages/base.html" %}
+{% block title %}Anmelden — {{ product.name }}{% endblock %}
+{% block content %}
+  <h1>Anmelden</h1>
+  {% if sent|default(false) %}
+    <p>{{ message }}</p>
+    <p class="muted">Schau in dein Postfach. Der Link gilt nur kurz.</p>
+  {% else %}
+    <p>Gib die Adresse ein, mit der du hier hinterlegt bist. Wir schicken dir
+    einen Link — ein Passwort brauchst du nicht.</p>
+    <form method="post" action="/creator/login">
+      <label for="email">E-Mail-Adresse</label>
+      <input type="email" id="email" name="email" required autocomplete="email"
+             autocapitalize="off" spellcheck="false">
+      <p><button type="submit">Link schicken</button></p>
+    </form>
+  {% endif %}
+{% endblock %}

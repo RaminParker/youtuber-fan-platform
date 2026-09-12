@@ -1,0 +1,60 @@
+{
+  "items": [
+    {
+      "id": "aaaaaaaaaaa",
+      "snippet": {
+        "title": "Warum Verwaltung so langsam ist",
+        "publishedAt": "2026-09-08T16:00:03Z",
+        "channelId": "UCpilot0000000000000000",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT23M41S" },
+      "status": { "privacyStatus": "public", "madeForKids": false }
+    },
+    {
+      "id": "bbbbbbbbbbb",
+      "snippet": {
+        "title": "In 40 Sekunden erklärt",
+        "publishedAt": "2026-09-05T11:30:00Z",
+        "channelId": "UCpilot0000000000000000",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT41S" },
+      "status": { "privacyStatus": "public", "madeForKids": false }
+    },
+    {
+      "id": "ddddddddddd",
+      "snippet": {
+        "title": "Premiere: Das große Gespräch",
+        "publishedAt": "2026-08-20T09:00:00Z",
+        "channelId": "UCpilot0000000000000000",
+        "liveBroadcastContent": "upcoming"
+      },
+      "contentDetails": { "duration": "PT0S" },
+      "status": { "privacyStatus": "public", "madeForKids": false }
+    },
+    {
+      "id": "eeeeeeeeeee",
+      "snippet": {
+        "title": "Die Premiere, die inzwischen lief",
+        "publishedAt": "2026-08-20T09:00:00Z",
+        "channelId": "UCpilot0000000000000000",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT1H4M12S" },
+      "status": { "privacyStatus": "public", "madeForKids": false },
+      "liveStreamingDetails": { "actualStartTime": "2026-09-10T19:00:00Z" }
+    },
+    {
+      "id": "fffffffffff",
+      "snippet": {
+        "title": "Privat gestellt",
+        "publishedAt": "2026-07-01T08:00:00Z",
+        "channelId": "UCpilot0000000000000000",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": { "duration": "PT12M0S" },
+      "status": { "privacyStatus": "private", "madeForKids": false }
+    }
+  ]
+}

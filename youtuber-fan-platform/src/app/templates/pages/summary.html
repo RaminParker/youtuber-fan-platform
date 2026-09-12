@@ -1,0 +1,25 @@
+{% extends "pages/base.html" %}
+{% block title %}{{ appearance.title }} — {{ creator.name }}{% endblock %}
+{% block head %}
+  {# Never in search results: the summary must not compete with the video. #}
+  <meta name="robots" content="noindex, nofollow">
+{% endblock %}
+{% block content %}
+  <header class="creator">
+    {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="44" height="44">{% endif %}
+    <div>
+      <strong>{{ creator.name }}</strong>
+      <div class="muted">Zusammenfassung für Abonnenten</div>
+    </div>
+  </header>
+
+  {% include "partials/summary_body.html" %}
+
+  {% if sentiment %}{% include "partials/sentiment_box.html" %}{% endif %}
+
+  <p><a class="button" href="{{ appearance.url }}">Video ansehen</a></p>
+
+  <p><a href="{{ base_url }}/k/{{ creator.slug }}">Auch abonnieren</a></p>
+
+  {% include "partials/platform_footer.html" %}
+{% endblock %}

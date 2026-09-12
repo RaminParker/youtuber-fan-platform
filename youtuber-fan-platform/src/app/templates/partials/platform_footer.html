@@ -1,0 +1,17 @@
+{# The platform fingerprint. The same partial renders in the mail and on the
+   summary page, so the two cannot drift apart. #}
+<div class="footer">
+  {% if subscription %}
+    Du bekommst diese Mail, weil du dich
+    {% if subscription.confirmed_at %}am {{ subscription.confirmed_at | local_date }}{% endif %}
+    über {{ base_url }}/k/{{ creator.slug }} für die Zusammenfassungen von
+    {{ creator.name }} eingetragen hast.
+  {% endif %}
+  Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
+  <p>
+    {% if subscription %}<a href="{{ base_url }}/abmelden/{{ subscription.unsubscribe_token }}">Abmelden</a> ·{% endif %}
+    <a href="{{ view_url }}">Online ansehen</a> ·
+    <a href="{{ base_url }}/impressum">Impressum</a> ·
+    <a href="{{ base_url }}/datenschutz">Datenschutz</a>
+  </p>
+</div>

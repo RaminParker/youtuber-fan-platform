@@ -1,0 +1,15 @@
+{% extends "email/base.html" %}
+{% block subject %}Dein Anmeldelink{% endblock %}
+{% block header_line %}Anmeldung bei {{ product.name }}{% endblock %}
+{% block content %}
+  <h1>Dein Anmeldelink</h1>
+  <p>Klick auf den Knopf, um zu deinen Einstellungen zu kommen.</p>
+  <p><a class="button" href="{{ link }}">Anmelden</a></p>
+  <p>Der Link gilt {{ settings.email.magic_link_minutes }} Minuten und funktioniert einmal.</p>
+  <p>Du hast keine Anmeldung angefordert? Dann ignoriere diese Mail einfach — ohne
+  den Link passiert nichts.</p>
+{% endblock %}
+{% block footer_reason %}
+  Du bekommst diese Nachricht, weil jemand eine Anmeldung für {{ creator.contact_email }}
+  angefordert hat.
+{% endblock %}

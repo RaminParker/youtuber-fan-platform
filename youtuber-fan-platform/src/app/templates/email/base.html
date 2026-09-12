@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block subject %}{{ product.name }}{% endblock %}</title>
+  <style>
+    /* Inlined at render time: mail clients ignore a style block. */
+    body { margin: 0; padding: 0; background: #f4f2ee;
+           font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+           font-size: 16px; line-height: 1.6; color: #1a1a1a; }
+    .wrap { max-width: 37.5rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    .card { background: #ffffff; border-radius: 10px; padding: 1.75rem 1.5rem; }
+    .creator { display: flex; align-items: center; gap: 0.75rem;
+               padding-bottom: 1rem; border-bottom: 3px solid {{ accent }}; margin-bottom: 1.25rem; }
+    .creator img { width: 44px; height: 44px; border-radius: 50%; }
+    .creator .name { font-weight: 700; font-size: 1.05rem; }
+    .creator .line { color: #5c5c5c; font-size: 0.85rem; }
+    h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+    p { margin: 0.75rem 0; }
+    a { color: {{ accent }}; }
+    .button { display: inline-block; background: {{ accent }}; color: #ffffff !important;
+              text-decoration: none; font-weight: 600; padding: 0.8rem 1.5rem;
+              border-radius: 6px; margin: 1rem 0; }
+    .footer { color: #6b6b6b; font-size: 0.8rem; line-height: 1.5;
+              margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e3e0da; }
+    .footer a { color: #6b6b6b; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      {% block creator_header %}
+      <div class="creator">
+        {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="">{% endif %}
+        <div>
+          <div class="name">{{ creator.name }}</div>
+          <div class="line">{% block header_line %}{{ product.name }}{% endblock %}</div>
+        </div>
+      </div>
+      {% endblock %}
+
+      {% block content %}{% endblock %}
+
+      {% block footer %}
+      <div class="footer">
+        {% block footer_reason %}{% endblock %}
+        Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
+      </div>
+      {% endblock %}
+    </div>
+  </div>
+</body>
+</html>
