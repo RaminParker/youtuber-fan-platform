@@ -1,0 +1,11 @@
+{# One button, one action. Every state-changing link from a mail lands here,
+   because link scanners follow links before a human ever sees them. #}
+{% extends "pages/base.html" %}
+{% block title %}{{ heading }} — {{ product.name }}{% endblock %}
+{% block content %}
+  <h1>{{ heading }}</h1>
+  <p>{{ body }}</p>
+  <form method="{{ method|default('post') }}" action="{{ action }}">
+    <button type="submit">{{ label }}</button>
+  </form>
+{% endblock %}

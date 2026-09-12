@@ -1,0 +1,722 @@
+<title>Umsetzungsnotizen</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --fg: #1c1a17; --muted: #6b6560; --rule: #e2ddd6;
+    --card: #ffffff; --accent: #8a5a2b; --blocking: #a3342a; --important: #9a6b12; --minor: #55707a;
+    --code-bg: #f2efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16150f; --fg: #ebe6dd; --muted: #9c948a; --rule: #33302a;
+      --card: #1e1c16; --accent: #d5a06a; --blocking: #e28078; --important: #d9b45c; --minor: #8fb3bd;
+      --code-bg: #262319;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16150f; --fg: #ebe6dd; --muted: #9c948a; --rule: #33302a;
+    --card: #1e1c16; --accent: #d5a06a; --blocking: #e28078; --important: #d9b45c; --minor: #8fb3bd;
+    --code-bg: #262319;
+  }
+  body { background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0 auto; max-width: 62rem; padding: 3rem 1.5rem 6rem; }
+  h1 { font-size: 1.9rem; letter-spacing: -.02em; margin: 0 0 .3rem; }
+  h2 { font-size: 1.25rem; letter-spacing: -.01em; margin: 3rem 0 .2rem;
+       padding-bottom: .5rem; border-bottom: 2px solid var(--rule); }
+  h3 { font-size: 1rem; margin: 2rem 0 .5rem; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 .4rem; }
+  .meta { color: var(--muted); font-size: .82rem; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em;
+    background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+  .entry { background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--rule);
+    border-radius: 6px; padding: 1rem 1.15rem; margin: .8rem 0; }
+  .entry.blocking { border-left-color: var(--blocking); }
+  .entry.important { border-left-color: var(--important); }
+  .entry.minor { border-left-color: var(--minor); }
+  .entry.open { border-left-color: var(--accent); border-left-width: 4px; }
+  .entry h4 { margin: 0 0 .45rem; font-size: .98rem; line-height: 1.4; }
+  .entry p { margin: .45rem 0; }
+  .tags { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; }
+  .tag { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
+    padding: .15em .5em; border-radius: 3px; background: var(--code-bg); color: var(--muted); }
+  .tag.blocking { color: var(--blocking); } .tag.important { color: var(--important); }
+  .tag.minor { color: var(--minor); }
+  .label { font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase;
+    letter-spacing: .05em; display: block; margin-top: .6rem; }
+  ul { margin: .4rem 0; padding-left: 1.2rem; }
+  li { margin: .25rem 0; }
+  .toc { background: var(--card); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1rem 1.3rem; margin: 2rem 0; }
+  .toc ol { margin: .3rem 0; padding-left: 1.3rem; }
+  .toc a { color: var(--fg); }
+  .status-empty { color: var(--muted); font-style: italic; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .wrap { overflow-x: auto; }
+</style>
+
+<h1>Umsetzungsnotizen</h1>
+<p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
+<p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
+<code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
+Stand: 11.09.2026 — Planprüfung abgeschlossen, Meilensteine M0 bis M4 umgesetzt, anschließend adversarial gegengelesen und die gefundenen Fehler behoben, danach ein Vereinfachungs-Durchgang (352 Tests grün, Lint sauber).</p>
+
+<div class="toc">
+  <strong>Inhalt</strong>
+  <ol>
+    <li><a href="#pruefung">Was die Planprüfung ergeben hat</a></li>
+    <li><a href="#entscheidungen">Entwurfsentscheidungen</a></li>
+    <li><a href="#abweichungen">Abweichungen vom Plan</a></li>
+    <li><a href="#kompromisse">Kompromisse</a></li>
+    <li><a href="#offen">Offene Fragen an dich</a></li>
+  </ol>
+</div>
+
+<h2 id="pruefung">1. Was die Planprüfung ergeben hat</h2>
+<p>Der Plan wurde vor Beginn der Umsetzung vollständig gegen das Manifest geprüft — sechs unabhängige
+Prüflinsen (innere Konsistenz, Manifest-Abdeckung, Mehrdeutigkeit, technische Korrektheit, Overengineering,
+Testbarkeit), jeder Befund anschließend gegengeprüft mit dem Auftrag, ihn zu <em>widerlegen</em>.
+14 Befunde haben diese Gegenprüfung überlebt. Sie stehen unten als Entscheidungen, Abweichungen und Fragen.</p>
+<p><strong>Was die Prüfung <em>nicht</em> gefunden hat, ist genauso wichtig:</strong> keinen Fehler in der
+Exactly-once-Mechanik (<code>deliveries</code>-Unique + Snapshot + <code>ORDER&nbsp;BY&nbsp;id</code>-Batches +
+Session-Advisory-Lock), keine Lücke im Stopp-Fenster, keine unbelegte Manifest-Anforderung ohne Zuhause im Plan
+und — bis auf die unten genannte Ausnahme — kein Overengineering. Die Retry-Leiter in §9.4 rechnet korrekt.
+Der Plan ist ungewöhnlich tragfähig; die Befunde sind Kanten, keine Fundamentrisse.</p>
+
+<h2 id="entscheidungen">2. Entwurfsentscheidungen</h2>
+<p class="meta">Stellen, an denen der Plan mehrdeutig oder unvollständig war und ich entschieden habe.
+Jede Entscheidung nennt die Alternative, die sie verdrängt hat.</p>
+
+<h3>Aus dem Plan-Review (§R)</h3>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Plan §8.4, §9.2</span></div>
+  <h4>Mail-Inhalt wird beim Versand der Vorschau eingefroren — neue Spalte <code>mailings.render_snapshot</code></h4>
+  <p>Der Idempotency-Key <code>mailing/{id}/{first_delivery_id}</code> ist über Wiederholungen stabil,
+  der gerenderte Inhalt aber nicht: Ändert der Creator während des bis zu ~23 Stunden langen Retry-Fensters
+  Variante, Begrüßung oder Reply-To, trägt Versuch N+1 einen anderen Body unter demselben Key. Was Resend
+  dann tut, ist nicht dokumentiert (§18).</p>
+  <span class="label">Gewählt</span>
+  <p>Ein <code>jsonb</code>-Feld auf <code>mailings</code>, geschrieben in derselben Anweisung, die
+  <code>preview_sent</code> setzt. Es hält Name, Variante, Begrüßung, Abschied, Reply-To, Logo und Akzentfarbe fest.</p>
+  <span class="label">Verworfene Alternative</span>
+  <p>Einen Body-Hash in den Key aufnehmen. Das macht einen geänderten Body zu einer legitim neuen Anfrage —
+  und damit zu einer <em>zweiten Mail</em> an Empfänger, deren erster Versuch in Wahrheit erfolgreich war.
+  Das hätte die härteste Zusage des Manifests („genau einmal zugestellt") gegen eine Spalte eingetauscht.</p>
+  <span class="label">Nebeneffekt, der die Entscheidung trägt</span>
+  <p>Ohne Einfrieren bekämen die Fans eine <em>andere</em> Mail als die, die der Creator in der Vorschau
+  gesehen und nicht gestoppt hat. Damit wäre das Stopp-Fenster aus Manifest §3.1 seinem Sinn nach wertlos.
+  Eine Spalte repariert beides.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Plan §9.1</span></div>
+  <h4><code>enrich</code>: unbekannte Dauer ist jetzt ein eigener Zustand, kein „zu kurz"</h4>
+  <p><code>duration_seconds</code> ist nullable, und <code>videos.list</code> meldet für eine gerade beendete
+  Live-Aufzeichnung <code>PT0S</code>, solange YouTube sie noch verarbeitet. Der naive Vergleich
+  <code>duration &lt; minimum</code> hätte genau diese Aufzeichnung nach <code>skipped_short</code> geschickt —
+  terminal, ohne Benachrichtigung, nie wieder geprüft.</p>
+  <span class="label">Gewählt</span>
+  <p>Neue Zeile in der Übergangstabelle: <code>skip_reason='no_duration_yet'</code>, Wiedervorlage in 6 Stunden,
+  <code>attempts</code> zählt nicht — exakt die Behandlung, die <code>not_public_yet</code> schon hatte.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §10, §11</span></div>
+  <h4>Die Online-Seite zeigt immer den Volltext, unabhängig von der Mail-Variante</h4>
+  <p>Plan §10 band die Seite an <code>creator.email_variant</code>. Für einen Creator auf <code>teaser</code>
+  hätte die Seite denselben Teaser plus einen „weiterlesen"-Link auf sich selbst gezeigt — den Volltext
+  hätte es nirgends gegeben. Manifest §7.6 nennt die Variante ausdrücklich „Teaser mit <em>Volltext online</em>".</p>
+  <span class="label">Gewählt</span>
+  <p>Die Variante steuert nur die Mail. <code>/s/{view_token}</code> rendert immer den
+  <code>detailed</code>-Block. Ein Test in M4 hält das fest.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §9.3</span></div>
+  <h4><code>cleanup</code> prüft jeden <code>analyzed</code>-Auftritt, nicht nur versendete</h4>
+  <p>Die alte Auswahl („alle Auftritte, deren Mailing in den letzten 30 Tagen versendet wurde") erreicht
+  Backfill-Zeilen nie: die bekommen per §9.5 überhaupt kein Mailing. Ihre <code>/s/</code>-Seiten sind aber genau
+  die, auf die jede Bestätigungsseite verlinkt. Ein gelöschtes Backkatalog-Video hätte dauerhaft eine
+  lebende Seite behalten — gegen Manifest §7.9.</p>
+  <span class="label">Gewählt</span>
+  <p>Auswahl auf Status <code>analyzed</code> umgestellt, ohne Alters- und ohne Mailing-Bedingung.
+  Für einen Kanal sind das eine Handvoll 1-Einheiten-Aufrufe am Tag.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §8.3</span></div>
+  <h4><code>record_call</code> committet in eigener Session</h4>
+  <p>Der Plan ließ offen, ob der Ledger-Eintrag in der Transaktion des Schritts landet. Er darf es nicht:
+  Ein Schritt, der eine Zusammenfassung bezahlt und danach beim Analyse-Upsert scheitert, hätte sonst den
+  Nachweis über das ausgegebene Geld mit zurückgerollt — und zehn Wiederholungen würden erneut zahlen,
+  gegen ein Ledger, das nie gewachsen ist. Genau den Ausreißer soll der Tagesdeckel verhindern.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §8.2</span></div>
+  <h4>Der offizielle Untertitel-Pfad läuft nur beim ersten Versuch</h4>
+  <p>250 Kontingent-Einheiten pro Video, bei zehn Wiederholungen bis zu 2.500 — für einen Anbieter, der
+  die Zeile beim ersten Mal schon abgelehnt hat. Gewählt: <code>service.fetch_transcript</code> bietet den
+  offiziellen Anbieter nur an, solange <code>appearances.attempts == 0</code>. Keine neue Spalte nötig, weil der
+  erfolgreiche <code>enrich</code> davor den Zähler zurückgesetzt hat.</p>
+  <span class="label">Bewusste Grenze</span>
+  <p>Damit entfällt der offizielle Anbieter auch nach einem bloß <em>temporären</em> Fehler. Das kostet nichts:
+  die einzige realistische temporäre Ursache ist ein erschöpftes Tageskontingent, das beim nächsten Versuch
+  genauso scheitern würde.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §10, §6.1</span></div>
+  <h4>Sign-up: Ratelimit pro IP gelockert, dafür Bremse pro Adresse</h4>
+  <p>Das alte Limit begrenzte nur die IP (5/Minute). Damit ließen sich rund 7.200 Bestätigungsmails am Tag
+  an ein fremdes Postfach treiben; deren Spam-Beschwerden landen auf der Versand-Subdomain, die alle Creator
+  teilen. Gleichzeitig ist ein enges IP-Limit falsch, weil viele Fans hinter derselben Mobilfunk-IP sitzen.</p>
+  <span class="label">Gewählt</span>
+  <p>IP-Limit auf 20/Minute, zusätzlich neue Spalte <code>subscriptions.confirm_sent_at</code> und
+  <code>web.confirm_resend_minutes = 10</code>: höchstens eine Bestätigungsmail pro Adresse und Fenster.
+  Kein Redis, kein zweiter Speicher.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §9.3</span></div>
+  <h4><code>is_backfill</code> wird in <code>enrich</code> neu bewertet</h4>
+  <p>Das Flag entstand aus dem Feed-Datum, das <code>enrich</code> später durch <code>actualStartTime</code> ersetzt.
+  Eine vor dem Onboarding angekündigte Premiere, die danach live geht, wäre dauerhaft als Backkatalog markiert
+  geblieben: Zusammenfassungsseite ja, Mail nie. Genau dieses Video ist typischerweise der neueste
+  Playlist-Eintrag beim Onboarding und wird also von <code>backfill</code> erfasst.</p>
+  <span class="label">Gewählt</span>
+  <p>Eine Zeile in <code>enrich</code>, dort wo <code>published_at</code> ohnehin überschrieben wird:
+  Flag löschen, wenn das korrigierte Datum ab <code>source.created_at</code> liegt.</p>
+</div>
+
+<h3>Beim Bauen von M0</h3>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">config.py</span></div>
+  <h4>Nur zwei Geheimnisse sind zum Start Pflicht</h4>
+  <p>Plan §6.2 listet alle Umgebungsvariablen gleichrangig. Verlangte man sie alle beim Start, ließe sich die
+  Anwendung in M0 gar nicht starten — es gibt weder YouTube-Key noch Resend-Konto im Code, der sie braucht.</p>
+  <span class="label">Gewählt</span>
+  <p><code>DATABASE_URL</code> und <code>SECRET_KEY</code> sind Pflicht, alles andere hat einen leeren Standard und wird
+  in der Schicht geprüft, die es benutzt. Die Startvalidierung aus §6.3 (Zeitversatz, Varianten, Modellpreise)
+  bleibt vollständig erhalten.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">web/server.py</span></div>
+  <h4>uvicorn bekommt eine Factory, keine Modul-Instanz</h4>
+  <p>Plan §15.2 schreibt <code>app.web.server:app</code>. Eine Instanz auf Modulebene hieße: Der bloße Import baut
+  Logging und Engine auf — schlecht für Tests und für jedes Werkzeug, das das Modul nur anfasst.</p>
+  <span class="label">Gewählt</span>
+  <p><code>uvicorn app.web.server:create_app --factory</code> in Dockerfile, Compose und <code>render.yaml</code>.
+  Der Import hat damit keinerlei Seiteneffekt.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">config.py</span></div>
+  <h4>TOML-Schlüssel <code>json</code> bleibt, das Python-Feld heißt <code>json_format</code></h4>
+  <p><code>json</code> überschattet ein Attribut von <code>BaseModel</code> und erzeugt eine Warnung bei jedem Start.
+  Umbenennen des TOML-Schlüssels hätte Plan §6.2 und <code>render.yaml</code> (<code>LOGGING__JSON=true</code>) ungültig gemacht.
+  Gelöst mit einem Alias: außen <code>json</code>, innen <code>json_format</code>.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">models.py</span></div>
+  <h4>Kein <code>CHECK</code> auf <code>creators.email_variant</code></h4>
+  <p>Die anderen Vokabulare stehen als <code>StrEnum</code> neben ihrer Tabelle und werden per <code>CHECK</code> gepinnt.
+  Die Mail-Varianten nicht: ihr Vorrat lebt in <code>settings.email.variants</code>, damit eine vierte Variante
+  ein Template-Block und eine Konfigurationszeile bleibt — nicht zusätzlich eine Migration.</p>
+  <p>Dafür <em>hat</em> <code>accent_color</code> eine Datenbank-Prüfung (<code>~ '^#[0-9a-fA-F]{6}$'</code>): eine Regel,
+  die sich nie ändert, gehört an die Stelle, an der sie niemand umgehen kann.</p>
+</div>
+
+
+<h3>Beim Bauen von M1 bis M4</h3>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M1</span><span class="tag">sources/base.py</span></div>
+  <h4><code>source_profile()</code> als vierte Methode der Connector-Schnittstelle</h4>
+  <p>Das Onboarding braucht Kanaltitel und Avatar. Plan §8.6 verbietet aber, den rohen Data-API-Client
+  in den Dienst-Container zu legen. Statt eine Ausnahme zu machen, habe ich die Schnittstelle um genau
+  das erweitert, was jede Quelle hat — auch ein Podcast hat einen Titel und ein Bild.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M1</span><span class="tag">creator_settings.py</span></div>
+  <h4>Eigenes Modul für die Auflösung der Creator-Überschreibungen</h4>
+  <p>Plan §6.3 verlangt <em>eine</em> Stelle, an der „NULL heißt: nimm den Dateistandard" entschieden wird.
+  In <code>config.py</code> hätte das Modell-Wissen in ein Modul gebracht, das nur Konfiguration laden soll.
+  Deshalb <code>app/creator_settings.py</code> mit einer Funktion und einem Rückgabetyp.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M2</span><span class="tag">oauth.py</span></div>
+  <h4><code>YouTubeConnection</code> statt roher API-Client im Container</h4>
+  <p>Der OAuth-Callback muss prüfen, <em>welchen</em> Kanal der Creator freigegeben hat — sonst läse man
+  bis zum Ende der Freigabe fremde Untertitel. Das braucht <code>channels.list?mine=true</code>, was nicht
+  Teil des Quellen-Vertrags ist. Gelöst mit einer kleinen Klasse, die den ganzen Ablauf hinter einer
+  Methode kapselt; die Route bleibt eine Route.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M2</span><span class="tag">steps.py</span></div>
+  <h4>Erloschene OAuth-Freigabe wird über den Flag-<em>Übergang</em> gemeldet, nicht über eine neue Spalte</h4>
+  <p>Der Creator soll einmal erfahren, dass die Verbindung weg ist — nicht bei jedem Video erneut.
+  Naheliegend wäre eine Spalte <code>oauth_reconsent_notified</code> gewesen. Stattdessen merkt sich der
+  Schritt den Zustand vor dem Abruf und benachrichtigt nur, wenn das Flag in <em>diesem</em> Lauf gekippt ist.
+  Keine Migration, gleiche Wirkung.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M4</span><span class="tag">jinja.py</span></div>
+  <h4><code>trim_blocks</code> und <code>lstrip_blocks</code> abgeschaltet</h4>
+  <p>Sie schlucken genau die Zeilenumbrüche, aus denen eine Nur-Text-Mail besteht: Aufzählungspunkte
+  liefen ineinander, Absätze verschwanden. In HTML spart die Einstellung nichts, was zählt.
+  Aufgefallen ist das erst beim tatsächlichen Rendern — nicht beim Lesen des Templates.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M4</span><span class="tag">render.py</span></div>
+  <h4><code>AsAttributes</code>: gespeicherte Analysen lesen sich wie das Modell</h4>
+  <p>Die Analyse liegt als JSONB in der Datenbank, die Mail rendert direkt aus dem Pydantic-Modell.
+  Ohne Adapter bräuchte das geteilte Partial zwei Schreibweisen (<code>summary.quote</code> in der Mail,
+  <code>summary["quote"]</code> auf der Seite) — und genau da würden Mail und Seite auseinanderlaufen,
+  was §8.6 ausdrücklich verhindern will.</p>
+</div>
+
+
+<h3>Nach dem Code-Review korrigiert</h3>
+<p class="meta">Der fertige Code wurde noch einmal adversarial gegengelesen. Diese Befunde habe ich
+am Code nachgeprüft, mit einem scheiternden Test nachgestellt und behoben.</p>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">worker.py</span></div>
+  <h4>Ein <em>permanenter</em> Fehler hätte die gesamte Pipeline dauerhaft blockiert</h4>
+  <p>Der Worker fing <code>TemporaryError</code> und <code>CostCapExceeded</code> ab und warf alles andere weiter.
+  <code>YouTubeError</code>, <code>LLMError</code> und <code>EmailError</code> sind aber gewöhnliche Exceptions —
+  ein zurückgezogener API-Key hätte gereicht. Folge: Der Tick bricht ab, niemand zählt einen Versuch,
+  niemand setzt eine Wiedervorlage. Die Zeile ist beim nächsten Tick wieder fällig, scheitert wieder —
+  und weil fällige Zeilen nach ID abgearbeitet werden, verhungert <em>alles dahinter</em>. Für immer.</p>
+  <span class="label">Behoben</span>
+  <p><code>record_permanent_failure()</code>: Zeile auf <code>failed</code>, Creator benachrichtigt, in eigener
+  Session committet. Dazu ein Auffangnetz in <code>run_due_steps</code>, damit eine Zeile den anderen nie
+  ihren Zug kostet. Drei Tests halten das fest.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">render.py</span></div>
+  <h4>Die Fan-Mail wäre beim ersten echten Versand abgestürzt</h4>
+  <p><code>render_summary_mail</code> las <code>subscription.subscriber.email</code> — diese Beziehung gab es im Modell
+  nicht. Latent, weil bisher nur <code>demo-mails</code> rendert, und das immer mit <code>preview=True</code>.
+  Der Weg, der tatsächlich an Fans verschickt, war ungetestet.</p>
+  <span class="label">Behoben</span>
+  <p>Eine <code>relationship()</code> auf <code>Subscription.subscriber</code> (die einzige im Schema, mit Begründung
+  im Code) plus ein Integrationstest, der genau diesen Weg geht. <code>alembic check</code> bestätigt: keine
+  Schemaänderung nötig.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">steps.py, worker.py</span></div>
+  <h4>Ein unerreichbarer Feed machte aus dem 6-Stunden-Poll eine 60-Sekunden-Schleife</h4>
+  <p><code>fetch_feed</code> wirft bei jedem Netzfehler. Im Poll fing das niemand: Quellen hinter der kaputten
+  wurden nie abgefragt, <code>_record_run</code> wurde nie erreicht — also galt der Job dauerhaft als fällig.
+  Weil der Tick die periodischen Jobs <em>zuerst</em> ausführte, riss ein Ausfall bei YouTube zusätzlich
+  die gesamte Pipeline mit: kein enrich, kein transcribe, kein summarize.</p>
+  <span class="label">Behoben</span>
+  <p>Fehler pro Quelle abgefangen und übersprungen, <code>_record_run</code> immer erreicht. Zusätzlich die
+  Tick-Reihenfolge auf die des Plans (§9) umgestellt: erst die fällige Arbeit, dann die periodischen
+  Jobs. Meine ursprüngliche Reihenfolge war eine unbemerkte Abweichung.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">steps.py</span></div>
+  <h4>Die OAuth-Benachrichtigung lief aus einem <code>finally</code> — auch beim Rollback</h4>
+  <p>Scheiterte die Kette temporär (offizieller Anbieter widerrufen, inoffizieller IP-gesperrt — laut
+  Plan §19 die erwartete Kombination), verschickte der <code>finally</code>-Block die Mail, die Exception lief
+  weiter, und der Worker rollte zurück. Das Flag war damit nie gespeichert, der rotierte Refresh-Token
+  verloren — und das nächste Video meldete dasselbe noch einmal. Genau die Zusage „einmal und nicht bei
+  jedem Video" hielt nicht.</p>
+  <span class="label">Behoben</span>
+  <p>Die Benachrichtigung sitzt jetzt auf den beiden Wegen, die auch committen, und nicht mehr im
+  <code>finally</code>. Ein Test hält fest, dass ein temporärer Fehlschlag gar keine Mail auslöst.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">worker.py</span></div>
+  <h4>SIGTERM wurde bis zu 60 Sekunden lang ignoriert</h4>
+  <p>Seit PEP 475 setzt <code>time.sleep</code> nach einem Signal mit neu berechneter Frist fort. Der
+  Signalhandler wirkte also erst nach dem vollen Schlafintervall — während Render etwa 30 Sekunden nach
+  SIGTERM ein SIGKILL schickt. Damit hätte genau der Abbruch mitten im Schritt stattgefunden, den der
+  Handler verhindern soll. Jetzt: <code>threading.Event.wait</code>, vom Handler geweckt.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">creator.py</span></div>
+  <h4>Das Anmeldeformular verriet, welche Adressen Kunden sind</h4>
+  <p>Bei einem Ausfall des Mail-Anbieters ergab eine bekannte Adresse einen 500er, eine unbekannte
+  weiterhin 200. Das ist ein Existenz-Orakel — und widersprach dem Docstring desselben Moduls.
+  Jetzt wird der Sendefehler protokolliert und die Antwort bleibt identisch.</p>
+  <p>Dazu zwei kleinere Korrekturen: Ein Creator ohne hinterlegten Kanal bekommt im OAuth-Callback eine
+  Seite statt eines 500ers, und ein unbrauchbares Webhook-Secret führt zu „Signatur ungültig" statt
+  zu einer Exception beim Aufrufer.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">creator.py, log.py</span></div>
+  <h4>Zwei Lücken, die das Review aufgedeckt hat, aber nicht als solche benannte</h4>
+  <p><strong>Magic-Link ohne zweite Bremse.</strong> Das IP-Limit war der einzige Schutz — und hinter
+  <code>--forwarded-allow-ips='*'</code> kann sich ein Angreifer seine IP aussuchen (siehe offene Frage 9).
+  Jetzt gilt: immer nur ein gültiger Link gleichzeitig. Kostet keine Spalte, und ein zweiter Link
+  brächte ohnehin nichts — der erste funktioniert noch.</p>
+  <p><strong>Sentry war ein Versprechen ohne Deckung.</strong> Gepinnte Abhängigkeit, Umgebungsvariable in
+  <code>.env.example</code> und <code>render.yaml</code>, Erwähnung in Plan §12 — aber nirgends initialisiert. Jetzt in
+  <code>configure_logging</code> verdrahtet, mit <code>send_default_pii=False</code>.</p>
+</div>
+
+
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">cli.py</span></div>
+  <h4><code>onboard</code> begrüßte den Betreiber mit einem Stacktrace</h4>
+  <p>Beim tatsächlichen Ausführen der Betriebsbefehle ohne API-Schlüssel — also genau so, wie ein neuer
+  Betreiber anfängt — endete <code>onboard</code> in einem Python-Traceback, der auf
+  <code>YouTubeError: channels.thumbs HTTP 403</code> hinauslief. Das ist der allererste Befehl aus der README.</p>
+  <span class="label">Behoben</span>
+  <p><code>main()</code> fängt die Wege, auf denen die Außenwelt „nein" sagt (<code>TemporaryError</code>, <code>YouTubeError</code>,
+  <code>LLMError</code>, <code>EmailError</code>, <code>GrantRevoked</code>) und beendet sich mit einer Meldung, die den
+  wahrscheinlich fehlenden Schlüssel nennt. Ein echter Programmfehler bekommt weiterhin seinen
+  Traceback — drei Tests halten beide Hälften fest.</p>
+</div>
+
+<h3>Nach dem Vereinfachungs-Durchgang</h3>
+<p class="meta">Vier Prüf-Linsen (Wiederverwendung, Vereinfachung, Effizienz, Eingriffstiefe) über den
+fertigen Code. Sieben Befunde tauchten in mehreren Linsen auf. Drei davon waren keine Stilfragen,
+sondern Verhalten.</p>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">Verhalten</span><span class="tag">worker.py</span></div>
+  <h4>Der Erschöpfungs-Zweig benachrichtigte den Creator nicht</h4>
+  <p>Ich hatte zwei Recorder gebaut: einer für „permanent gescheitert" (benachrichtigt), einer für
+  „Versuche aufgebraucht" (loggt nur). Beide enden auf <code>failed</code>. Plan §9.4 verlangt die Meldung nach
+  dem letzten Versuch — und der Benachrichtigungstext („Wir haben es mehrfach versucht") ist wörtlich
+  für den Zweig geschrieben, der stumm blieb.</p>
+  <span class="label">Behoben</span>
+  <p>Ein <code>record_outcome()</code>, das aus dem Ausnahmetyp entscheidet: warten, wiederholen oder aufgeben.
+  Die Benachrichtigung hängt jetzt am <em>Zustand</em>, nicht am Weg dorthin — an der einen Stelle, an der
+  <code>failed</code> entsteht. Damit kann ein künftiger dritter Weg es nicht wieder vergessen.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">Verhalten</span><span class="tag">steps.py</span></div>
+  <h4>Das Untertitel-Gate las einen Zähler, der etwas anderes bedeutet</h4>
+  <p><code>attempts == 0</code> sollte heißen „der offizielle Anbieter hat noch nicht abgelehnt". <code>attempts</code> ist
+  aber der gemeinsame Wiederholungszähler <em>aller</em> Schritte, und in der Praxis erhöht ihn der
+  <em>inoffizielle</em> Anbieter (IP-Sperre) — genau die Kombination, die Plan §19 erwartet. Ergebnis: Ein
+  Creator, dessen erster Versuch an einer gesperrten IP scheiterte und der <em>daraufhin</em> YouTube
+  verbindet, bekommt für dieses Video nie offizielle Untertitel.</p>
+  <span class="label">Behoben</span>
+  <p>Neue Spalte <code>appearances.official_captions_declined</code>, gesetzt wenn der offizielle Anbieter
+  dauerhaft ablehnt — in eigener Session committet, damit die Erkenntnis einen Rollback überlebt
+  (sonst wären die 250 Kontingent-Einheiten beim nächsten Versuch erneut fällig). Der Prüfer hat zu
+  Recht angemerkt, dass ich beim Bestätigungs-Throttle die umgekehrte Begründung benutzt hatte.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Verhalten</span><span class="tag">render.py</span></div>
+  <h4>Zwei Zustände, die einander widersprechen konnten</h4>
+  <p><code>preview</code> war ein Parameter neben <code>subscription</code>, obwohl der Docstring selbst sagte:
+  „<code>subscription</code> ist genau dann <code>None</code>, wenn es die Vorschau ist". Und die Variante wurde als
+  Parameter übergeben <em>und</em> im Snapshot eingefroren, wobei das Template den Parameter las — beim
+  Versand hätte also eine Live-Variante gegen einen eingefrorenen Snapshot laufen können, genau der
+  Fall, den die Spalte verhindern soll.</p>
+  <span class="label">Behoben</span>
+  <p><code>preview</code> wird abgeleitet. <code>variant</code> ist ein optionaler Override, den nur <code>demo-mails</code> benutzt —
+  das rendert absichtlich alle drei Formate. Der Prüfer wollte den Parameter ganz streichen; das hätte
+  den Zweck des Befehls zerstört.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Aufräumen</span></div>
+  <h4>Zusammengeführt und entfernt</h4>
+  <ul>
+    <li><strong>Vier Token-Erzeugungen</strong> (zwei Kopien plus zwei Inline-Aufrufe, mit zwei Kopien der
+    Konstanten) → <code>app/tokens.py</code>. Die Entropie anzuheben ist jetzt eine Zeile statt fünf.</li>
+    <li><strong>Zwei <code>mm:ss</code>-Formatierer</strong> → einer. Der eine formatiert die Marken, die das Modell als
+    einzige Zeitangaben benutzen darf, der andere die Beschriftung der Sprunglinks — die mussten
+    übereinstimmen und taten es nur zufällig.</li>
+    <li><strong>Zwei YouTube-Watch-URLs</strong> → eine in <code>data_api.py</code>. Eine per Feed und eine per API
+    aufgenommene Zeile hätten sonst verschiedene <code>url</code>-Werte bekommen können.</li>
+    <li><strong>Drei <code>render_page</code>-Varianten</strong> (zwei gleichnamig mit verschiedenen Rückgabetypen) →
+    <code>app/web/pages.py</code>.</li>
+    <li><strong>Zwei Analyse-Leser</strong> → <code>app/analysis/stored.py</code>, das die gespeicherte JSONB in das
+    Pydantic-Modell zurückvalidiert, aus dem sie kam. Dadurch entfällt der <code>AsAttributes</code>-Adapter,
+    und eine Zeile aus einer älteren Prompt-Version scheitert beim Laden mit Feldnamen — statt mitten
+    im Rendern vor einem Fan.</li>
+    <li><strong>Der Worker schrieb Appearance-Status selbst</strong>, obwohl <code>steps.py</code> im Docstring das
+    Gegenteil behauptet. Jetzt über <code>steps.mark_failed()</code>; die Zusage stimmt wieder.</li>
+    <li><strong>Toter Code</strong>: <code>is_due()</code> (der Worker fragt dasselbe in SQL), <code>effective_variant()</code>,
+    <code>APPEARANCE_TERMINAL</code>, ein <code>Response</code>-Parameter samt doppeltem Header (FastAPI verwirft ihn,
+    wenn der Handler selbst eine Response zurückgibt), drei ungenutzte <code>settings</code>-Parameter, eine
+    ungenutzte Session in <code>notify_creator</code>, drei <code>AssertionError("unreachable")</code> (ersetzt durch
+    <code>NoReturn</code>).</li>
+  </ul>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Effizienz</span></div>
+  <h4>Zwei Befunde übernommen, fünf bewusst nicht</h4>
+  <p><strong>Übernommen:</strong> Die Online-Ansicht brauchte fünf Abfragen für zwei Objekte — jetzt ein Join.
+  Diese Seite ist der Link, auf den ein ganzes Mailing zeigt, sie wird also im Schwall aufgerufen.
+  Und <code>fetch_feed</code> bildet seine Fehler jetzt selbst auf <code>TemporaryError</code> ab (wie jeder andere
+  Transport im Projekt) und nimmt einen geteilten Client entgegen.</p>
+  <p><strong>Nicht übernommen</strong>, mit Begründung: <code>enrich</code> pro Zeile statt im Bündel (bricht das
+  Ein-Schritt-pro-Zeile-Modell aus Plan §8.5 für 15 gesparte Kontingent-Einheiten von 10.000);
+  Sammel-Insert für Feed-Einträge und das Vorabladen von Source und Creator (Mikro-Optimierung bei
+  einem Kanal); der Leerlauf-Tick mit zwei Verbindungen pro Minute (harmlos, und in-memory-Zustand
+  wäre teurer als das Problem); eine Obergrenze für dauerhaft geparkte Zeilen (Plan §9.1 entscheidet
+  das ausdrücklich: „No cleanup rule, no special timer").</p>
+  <p>Der Prüfer hat außerdem drei meiner Entscheidungen ausdrücklich bestätigt: frischer Client pro
+  Transkript-Abruf (die Bibliothek ist nicht thread-sicher), die <code>jump_link</code>-Closure (hält nur zwei
+  Namen, lebt einen Render lang) und die <code>lru_cache</code>-Stellen.</p>
+</div>
+
+
+<h3>Beim Nachprüfen der README gefunden</h3>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">config/bifrost.json</span></div>
+  <h4>Das LLM-Gateway startete überhaupt nicht</h4>
+  <p>Beim Nachprüfen jedes README-Befehls fiel auf, dass <code>docker compose up</code> das Gateway zwar startet,
+  der Container aber sofort mit Code 1 abbricht:
+  <em>„failed to initialize governance handler: config store is required"</em>.</p>
+  <p>Plan §13 und §18 behaupteten das Gegenteil („governance runs in-memory without a config store").
+  Diese Tatsache stammte aus der Recherche und stimmt nicht. Aufgefallen ist sie nur, weil der Dienst
+  tatsächlich gestartet wurde — bis dahin hatte ich nur Postgres, Web und Worker hochgefahren, und alle
+  Tests laufen gegen einen Fake-Gateway.</p>
+  <span class="label">Behoben</span>
+  <p><code>config_store</code> auf SQLite unter <code>/app/data</code> aktiviert, lokal ein benanntes Volume, in
+  <code>render.yaml</code> eine 1-GB-Disk. Zweiter Fehler direkt dahinter: Ein virtueller Schlüssel ohne
+  <code>allowed_models</code> weist <em>jede</em> Anfrage mit <code>403 model_blocked</code> ab — auch das erst im Betrieb
+  sichtbar. Plan §13, §15.2 und §18 sind korrigiert und als am 12.09. verifiziert gekennzeichnet.</p>
+  <span class="label">Gegengeprüft</span>
+  <p>Die Sicherheitszusage aus Plan §13 hält: ohne Schlüssel 401, mit falschem Schlüssel 401, mit
+  richtigem Schlüssel erreicht die Anfrage den Anbieter und scheitert nur noch am fehlenden
+  <code>ANTHROPIC_API_KEY</code>. Damit ist der Smoke-Test aus der Go-live-Liste schon jetzt erfüllt.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Tests</span><span class="tag">conftest.py</span></div>
+  <h4><code>uv run pytest</code> brauchte einen Export von Hand</h4>
+  <p><code>DATABASE_URL_TEST</code> steht in <code>.env.example</code>, aber die Testsuite liest <code>.env</code> bewusst nicht (sonst
+  hingen Tests an der Entwicklermaschine). Damit übersprangen sich die Integrationstests stillschweigend,
+  solange man die Variable nicht selbst exportierte. Die Fixture liest diesen einen Wert jetzt direkt aus
+  <code>.env</code> — er wird gebraucht, bevor es überhaupt Settings gibt. Damit stimmt der Befehl in der README.</p>
+</div>
+
+<h2 id="abweichungen">3. Abweichungen vom Plan</h2>
+<p class="meta">Bewusste Abweichungen von der Spezifikation, mit Begründung.</p>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Plan §17</span></div>
+  <h4>Meilensteine neu geschnitten: M1, M2 und M3 holen Teile aus M4 und M6 vor</h4>
+  <p>Der Plan war in dieser Hinsicht nicht umsetzbar. Zwei Beispiele:</p>
+  <ul>
+    <li><strong>M2</strong> liefert Magic-Link-Login und <code>notify_creator</code> — beides verschickt Mails —,
+    aber <code>delivery/render.py</code> und <code>ResendClient</code> standen erst in M4. M2s eigener Test
+    („notice mail captured by the fake") hätte nichts zu fangen gehabt.</li>
+    <li><strong>M3</strong> erzeugt das Mailing mit <code>compute_send_at()</code>, doch <code>jobs/schedule.py</code> und
+    <code>delivery/mailing.py</code> standen in M6. Auch M1 braucht schon <code>retry_at()</code>.</li>
+  </ul>
+  <span class="label">Gewählt</span>
+  <p><code>jobs/schedule.py</code> (rein, ohne Datenbank) nach M1. Die Erzeugungsfunktion aus
+  <code>delivery/mailing.py</code> nach M3. Ein minimaler Auslieferungs-Anteil nach M2:
+  <code>ResendClient.send()</code> ohne Batch und ohne 429-Leiter, <code>render.py</code> mit den Composern für
+  Benachrichtigung und Magic-Link, <code>templates/email/base.html</code>. M4 und M6 sind entsprechend
+  umformuliert, damit kein Meilenstein Arbeit beansprucht, die ein früherer schon geliefert hat.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">jinja.py</span></div>
+  <h4>Die Jinja-Globale <code>roadmap</code> kommt erst mit M8</h4>
+  <p>Plan §8.6 nennt <code>roadmap</code> als Global der einen Jinja-Umgebung. Gelesen wird sie ausschließlich von
+  der Feature-Vorschau der Verkaufsseite, und die ist M8. <code>config/roadmap.toml</code> und die Globale entstehen
+  dort — bis dahin wären beide toter Code.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">services.py</span></div>
+  <h4><code>services.py</code> entsteht mit M1 statt mit M0</h4>
+  <p>M0 listet <code>app/services.py</code> als Lieferung. In M0 gibt es aber keinen einzigen Dienst, den der
+  Container halten könnte — es wäre eine leere Hülle mit einem <code>set_services()</code>, das nichts setzt.
+  Die Datei entsteht in M1 zusammen mit dem ersten Dienst, den sie hält (dem YouTube-Connector).</p>
+  <p>Die Worker-Schleife dagegen ist echt und vollständig, nicht das im Plan genannte „Skelett":
+  Signalbehandlung, Fehlerfang, Takt. Was fehlt, ist nur die Liste der Schritte, die sie aufruft.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M0</span><span class="tag">Tests</span></div>
+  <h4><code>tests/</code> ist ein Paket, und die lokale <code>.env</code> ist in Tests abgeschaltet</h4>
+  <p>Nicht im Plan, aber notwendig: Ohne <code>__init__.py</code> lässt sich <code>tests/conftest.py</code> nicht von
+  Testmodulen importieren, was Plan §14 mit <code>tests/fakes.py</code> voraussetzt.</p>
+  <p>Wichtiger: <code>Secrets</code> liest <code>.env</code>. Damit bestanden zwei Tests nur auf Maschinen <em>ohne</em>
+  passende <code>.env</code> — ein Test, der von der Entwicklermaschine abhängt, ist keiner. Die Fixture schaltet
+  das Dotenv für jeden Test ab.</p>
+</div>
+
+<h2 id="kompromisse">4. Kompromisse</h2>
+<p class="meta">Erwogene Alternativen und warum die gewählte Lösung gewonnen hat.</p>
+
+<div class="entry">
+  <h4>Migrationstest in einer Wegwerf-Datenbank statt <code>downgrade</code>/<code>upgrade</code> am Platz</h4>
+  <p>M0 verlangt zu prüfen, dass <code>upgrade head</code> auf leerer Datenbank läuft und <code>downgrade base</code>
+  funktioniert. Am einfachsten wäre, das in <code>app_test</code> zu tun — aber ein fehlgeschlagener Lauf ließe
+  dort ein halbes Schema zurück und würde jeden folgenden Integrationstest vergiften, abhängig von der
+  Reihenfolge.</p>
+  <p>Gewählt: eine Fixture legt <code>app_migration_scratch</code> an und wirft sie hinterher weg. Kostet ~15 Zeilen
+  und macht die Tests reihenfolgeunabhängig.</p>
+</div>
+
+<div class="entry">
+  <h4><code>httpx2</code> als Test-Abhängigkeit aufgenommen</h4>
+  <p>Starlette 1.6 warnt, dass sein <code>TestClient</code> mit <code>httpx</code> veraltet ist. Die Warnung zu ignorieren
+  hätte gereicht — bis die Unterstützung wegfällt und die gesamte Testsuite auf einmal bricht. Eine
+  Entwicklungs-Abhängigkeit ist billiger als dieser Tag. <code>httpx</code> bleibt für die eigenen ausgehenden
+  Aufrufe gepinnt wie in Plan §4.</p>
+</div>
+
+<div class="entry">
+  <h4>Jinja mit <code>StrictUndefined</code></h4>
+  <p>Standardmäßig rendert Jinja eine unbekannte Variable als leeren String. In einer Mail, die an die ganze
+  Liste geht, heißt das: eine fehlende Begrüßung fällt niemandem auf, bis ein Fan fragt. Mit
+  <code>StrictUndefined</code> scheitert das Rendern laut — im Test, nicht beim Empfänger.</p>
+</div>
+
+
+<div class="entry">
+  <h4>Zwei Arten von Integrationstests statt einer</h4>
+  <p>Plan §14 sagt „eine Transaktion pro Test, am Ende zurückgerollt". Das trägt nicht überall: Worker und
+  Kostenledger öffnen <em>absichtlich</em> eigene Sessions und committen — der Ledger, damit ein
+  gescheiterter Schritt den Nachweis über ausgegebenes Geld nicht mit zurückrollt; der Worker, damit eine
+  schlechte Zeile nicht die Arbeit an den anderen zunichtemacht.</p>
+  <p>Gewählt: zwei Fixtures. <code>session</code> rollt zurück (schnell, für Schritt-Tests),
+  <code>committed_database</code> lässt committen und räumt per <code>TRUNCATE</code> auf. Die Alternative — alles
+  zurückrollen — hätte bedeutet, genau die Eigenschaften nicht zu testen, auf denen die Zusagen beruhen.</p>
+</div>
+
+<div class="entry">
+  <h4>Kein Body-Hash im Idempotency-Key</h4>
+  <p>Erwogen als Alternative zum Einfrieren des Inhalts (siehe oben). Verworfen, weil ein geänderter Body
+  damit zu einer legitim neuen Anfrage wird — und zu einer <em>zweiten Mail</em> an Empfänger, deren erster
+  Versuch in Wahrheit erfolgreich war. Das hätte „genau einmal zugestellt" gegen eine gesparte Spalte
+  getauscht.</p>
+</div>
+
+<div class="entry">
+  <h4>Pro-Adresse-Bremse über eine Spalte statt über Ableitung</h4>
+  <p><code>confirm_expires_at</code> minus <code>confirm_token_days</code> ergäbe rechnerisch den Zeitpunkt der
+  letzten Bestätigungsmail — ohne neue Spalte. Das ist aber genau die Art Cleverness, die drei Monate
+  später niemand mehr versteht. Eine ehrliche Spalte <code>confirm_sent_at</code> ist billiger als der Kommentar,
+  den die Ableitung gebraucht hätte.</p>
+</div>
+
+<div class="entry">
+  <h4><code>StrictUndefined</code> auch für Mail-Templates</h4>
+  <p>Kostet Sorgfalt beim Schreiben: jede Variable muss definiert sein, auch die optionalen.
+  Der Gegenwert ist, dass eine vergessene Begrüßung im Test auffällt und nicht bei zehntausend Empfängern.</p>
+</div>
+
+<h2 id="offen">5. Offene Fragen an dich</h2>
+<p class="meta">Das solltest du bestätigen oder überarbeiten. Bis zu einer Antwort arbeite ich mit dem
+jeweils genannten Standard weiter.</p>
+
+<div class="entry open">
+  <h4>1. Postfach für die Domain — blockiert M9, nicht früher</h4>
+  <p>Der Plan verschickt Mails, empfängt aber keine. <code>support_email</code> ist die Reply-To-Rückfallebene für
+  Creator ohne eigene Adresse <em>und</em> der einzige Empfänger des Kontaktformulars — laut Manifest §5.5 der
+  einzige eingehende Vertriebskanal der Verkaufsseite. Versenden braucht keinen MX-Eintrag, Empfangen schon,
+  und im Plan stand nirgends einer.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p><code>SUPPORT_EMAIL</code> ist als optionale Umgebungsvariable ergänzt. Trage dort eine existierende Adresse ein
+  (deine eigene genügt), sonst läuft jede Kontaktmail als Hard-Bounce gegen genau den Versand-Ruf, den §11 schützt.</p>
+</div>
+
+<div class="entry open">
+  <h4>2. Abmeldung während eines laufenden Versands</h4>
+  <p>§9.2 nimmt die Empfängerliste als Momentaufnahme beim Versandstart. Wer sich abmeldet, während das Mailing
+  sendet, bekommt diese eine Mail also noch — normalerweise Sekunden Zeitfenster, bei einem wiederholenden
+  Versand aber Stunden.</p>
+  <span class="label">Annahme</span>
+  <p>Akzeptabel. Die Alternative (jeden Batch neu filtern) bricht das Einfrieren des Inhalts, auf dem die
+  Exactly-once-Zusage beruht. Bitte bestätigen.</p>
+</div>
+
+<div class="entry open">
+  <h4>3. Trage deine Schlüssel selbst in <code>.env</code> ein</h4>
+  <p>Du hast Anthropic und Resend. Ich habe <code>.env</code> aus <code>.env.example</code> angelegt (git-ignoriert),
+  die Schlüssel aber bewusst leer gelassen — Geheimnisse sollen nicht durch einen Chatverlauf laufen.
+  Trag sie direkt ein: <code>ANTHROPIC_API_KEY</code> und <code>RESEND_API_KEY</code>. Ohne den ersten startet der
+  LLM-Gateway-Container nicht; Postgres, Web und Worker laufen auch ohne.</p>
+</div>
+
+<div class="entry open">
+  <h4>4. Kein YouTube-Zugang — M1 wird gegen Fakes verifiziert</h4>
+  <p>Du hast weder Google-Cloud-Projekt noch YouTube-API-Key genannt. Der öffentliche Atom-Feed braucht keinen
+  Schlüssel, der Rest schon (<code>videos.list</code>, Kommentare, Kanaldaten).</p>
+  <span class="label">Folge</span>
+  <p>M1 baue und teste ich vollständig gegen Fakes und echte Feed-Fixtures. Das Abnahmekriterium „nach
+  <code>cli onboard</code> legt <code>cli poll</code> Auftritte mit korrekter Dauer an" kann ich erst mit einem
+  API-Key gegen den echten Kanal zeigen. Sag Bescheid, sobald es ihn gibt — samt Pilot-Kanal-ID.</p>
+</div>
+
+<div class="entry open">
+  <h4>5. Produktname als Kunstwort</h4>
+  <p>Du wolltest „Klartext" behalten, bist aber offen. Der Name steht an genau einer Stelle
+  (<code>settings.product.name</code>), die Umbenennung kostet eine Zeile — entscheide also in Ruhe.
+  Manifest §15 verwirft Klartext praktisch selbst, weil alle Domains vergeben sind. Kunstwort-Vorschläge
+  liefere ich am Ende dieser Sitzung nach, wenn du magst.</p>
+</div>
+
+<div class="entry open">
+  <h4>6. Impressum und Datenschutz sind Platzhalter</h4>
+  <p>Beide Seiten liefern aktuell einen Hinweistext, dass der Inhalt fehlt (im Code als <code>TODO:</code>
+  markiert). Beide müssen laut Plan §20 die <em>YouTube API Services</em> nennen und auf Googles
+  Datenschutzerklärung verweisen. Das ist Juristen- und Betreibertext, keine Entwicklungsaufgabe —
+  aber es blockiert M9, und die OAuth-Verifizierung bei Google verlangt beide Seiten <em>live</em>.</p>
+</div>
+
+<div class="entry open">
+  <h4>7. Der Spike aus M2 ist offen</h4>
+  <p>Plan §17 M2 sieht einen 30-Minuten-Test vor: Liefert <code>captions.download</code> dem Kanalinhaber
+  auch die <em>automatisch erzeugte</em> Spur? Die offizielle Doku schweigt dazu, Dritte behaupten 403 ohne Beleg.
+  Ohne Google-Cloud-Projekt kann ich das nicht prüfen.</p>
+  <span class="label">Warum es zählt</span>
+  <p>Fällt der Test negativ aus, deckt der offizielle Weg nur <em>hochgeladene</em> Untertitel ab — und der
+  Pilot müsste welche hochladen, sonst trägt in der Produktion dauerhaft der inoffizielle Anbieter.
+  Der Code ist auf beide Ausgänge vorbereitet; die Antwort gehört anschließend in die
+  Entscheidungen von <code>docs/ARCHITECTURE.md</code>.</p>
+</div>
+
+<div class="entry open">
+  <h4>8. Beispielmail auf der Verkaufsseite ist erfunden</h4>
+  <p><code>partials/example_mail.html</code> enthält derzeit einen plausiblen, aber ausgedachten Beispieltext.
+  Sobald es echte Analysen eines echten Kanals gibt, soll er laut Plan §10 durch einen Schnappschuss aus
+  <code>cli demo-mails</code> ersetzt werden. Eine erfundene Beispielmail auf einer Verkaufsseite ist genau
+  die Art Detail, die ein aufmerksamer Creator bemerkt.</p>
+</div>
+
+<div class="entry open">
+  <h4>9. <code>--forwarded-allow-ips='*'</code> in <code>render.yaml</code> macht den Ratelimit-Schlüssel fälschbar</h4>
+  <p>Plan §13 und §15.2 schreiben diese Einstellung vor, damit Rate-Limits die echte Client-Adresse sehen.
+  Sie hat aber eine Kehrseite: uvicorn vertraut dann <em>jeder</em> weitergeleiteten Adresse und nimmt den
+  am weitesten links stehenden <code>X-Forwarded-For</code>-Eintrag — also den, den der Aufrufer selbst gesetzt hat.
+  Wer die Kopfzeile variiert, bekommt für jede Anfrage einen frischen Zähler.</p>
+  <span class="label">Was ich getan habe</span>
+  <p>Die zwei Stellen, an denen das wirklich weh täte, hängen jetzt nicht mehr an der IP: Die
+  Bestätigungsmail ist pro Adresse gedrosselt, der Magic-Link auf einen gültigen Link gleichzeitig
+  begrenzt. Das IP-Limit ist damit die zweite Verteidigungslinie, nicht die einzige.</p>
+  <span class="label">Was du entscheiden musst</span>
+  <p>Die saubere Lösung ist, statt <code>*</code> die Proxy-Adressen von Render einzutragen. Welche das sind,
+  kann ich nicht verifizieren — das steht in Renders Dokumentation und gehört vor M9 geklärt.</p>
+</div>

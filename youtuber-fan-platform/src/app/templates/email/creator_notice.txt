@@ -1,0 +1,16 @@
+{{ headline }}
+
+{% if video_title %}Es geht um: {{ video_title }}
+
+{% endif %}{{ explanation }}
+{% if what_now %}
+{{ what_now }}
+{% endif %}
+{% if action_url %}
+{{ action_label }}: {{ action_url }}
+{% endif %}
+Alle anderen Videos laufen normal weiter — du musst nichts tun.
+
+--
+Du bekommst diese Nachricht, weil du {{ product.name }} für deinen Kanal nutzt.
+Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.

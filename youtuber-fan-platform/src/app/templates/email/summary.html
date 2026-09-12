@@ -1,0 +1,30 @@
+{% extends "email/base.html" %}
+{% block subject %}{{ creator.name }}: {{ appearance.title }}{% endblock %}
+{% block header_line %}Zusammenfassung für Abonnenten von {{ creator.name }}{% endblock %}
+{% block content %}
+  {% if preview %}
+    <div class="preview-bar">
+      <strong>Vorschau für {{ creator.name }}</strong> — so sehen deine Abonnenten die Mail.
+      Sie geht um {{ send_at | local_datetime }} raus.
+      <p>
+        <a href="{{ base_url }}/m/{{ stop_token }}/stoppen">Diese Mail stoppen</a> ·
+        <a href="{{ base_url }}/m/{{ stop_token }}/verschieben">Um {{ postpone_hours }} Stunden verschieben</a>
+      </p>
+    </div>
+  {% endif %}
+
+  {% if creator.greeting_text %}<p>{{ creator.greeting_text }}</p>{% endif %}
+
+  {% include "partials/summary_body.html" %}
+
+  {% if sentiment %}{% include "partials/sentiment_box.html" %}{% endif %}
+
+  <p><a class="button" href="{{ appearance.url }}">Video ansehen</a></p>
+
+  {% if variant == "teaser" %}
+    <p><a href="{{ view_url }}">Weiterlesen — die ganze Zusammenfassung</a></p>
+  {% endif %}
+
+  {% if creator.farewell_text %}<p>{{ creator.farewell_text }}</p>{% endif %}
+{% endblock %}
+{% block footer %}{% include "partials/platform_footer.html" %}{% endblock %}

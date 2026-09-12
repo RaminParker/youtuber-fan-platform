@@ -1,0 +1,50 @@
+{# The three variants, all rendered from one Summary. Switching between them is
+   a template choice, never a new analysis — which is why a creator can change
+   their mind about the format without anything being summarised again.
+
+   `variant` selects the block. `detailed` is also what the online page always
+   shows, whatever the mail variant is: the teaser's "weiterlesen" has to arrive
+   somewhere that actually has the full text. #}
+
+<h1>{{ summary.headline }}</h1>
+<p>{{ summary.core_message }}</p>
+
+{% if variant == "compact" %}
+  <ul>
+    {% for point in summary.key_points %}
+      <li>
+        {{ point.text }}
+        {% if point.timestamp_seconds is not none %}
+          <a href="{{ jump(point.timestamp_seconds) }}">{{ point.timestamp_seconds | clock }}</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+
+{% elif variant == "detailed" %}
+  {% for section in summary.sections %}
+    <h2>{{ section.title }}</h2>
+    <ul>
+      {% for point in section.key_points %}
+        <li>
+          {{ point.text }}
+          {% if point.timestamp_seconds is not none %}
+            <a href="{{ jump(point.timestamp_seconds) }}">{{ point.timestamp_seconds | clock }}</a>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
+
+{% elif variant == "teaser" %}
+  {# Deliberately short: the point of this variant is the click. #}
+{% endif %}
+
+{% if summary.quote %}
+  <blockquote>
+    „{{ summary.quote }}"
+    {% if summary.quote_timestamp_seconds is not none %}
+      <a href="{{ jump(summary.quote_timestamp_seconds) }}">{{ summary.quote_timestamp_seconds | clock }}</a>
+    {% endif %}
+  </blockquote>
+{% endif %}

@@ -1,0 +1,144 @@
+# Deploy = git push. Applying this Blueprint prompts once for every `sync: false`
+# value; later Blueprint syncs ignore them, so new secrets are added in the
+# dashboard. Blueprint sync runs only on pushes that change this file.
+
+services:
+  - type: web
+    name: web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: 0.5c-512mb          # a paid plan is required for preDeployCommand
+    region: frankfurt
+    healthCheckPath: /health  # without this only the TCP port is probed
+    autoDeployTrigger: commit
+    preDeployCommand: uv run alembic upgrade head
+    # --proxy-headers so rate limits see the real client address, not the proxy.
+    dockerCommand: >-
+      uv run uvicorn app.web.server:create_app --factory
+      --host 0.0.0.0 --port $PORT
+      --proxy-headers --forwarded-allow-ips='*'
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: platform-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: LLM_GATEWAY_URL
+        fromService:
+          type: pserv
+          name: bifrost
+          property: hostport
+      - key: LLM_GATEWAY_KEY
+        sync: false
+      - key: LOGGING__JSON
+        value: "true"
+      - key: BASE_URL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEYS
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+  - type: worker
+    name: worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: 0.5c-512mb
+    region: frankfurt
+    autoDeployTrigger: commit
+    dockerCommand: uv run python -m app.worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: platform-db
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: web
+          envVarKey: SECRET_KEY
+      - key: LLM_GATEWAY_URL
+        fromService:
+          type: pserv
+          name: bifrost
+          property: hostport
+      - key: LLM_GATEWAY_KEY
+        sync: false
+      - key: LOGGING__JSON
+        value: "true"
+      - key: BASE_URL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEYS
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: TRANSCRIPT_PROXY_USERNAME
+        sync: false
+      - key: TRANSCRIPT_PROXY_PASSWORD
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+  # The LLM gateway. Private: its inference routes and bundled web UI are
+  # unauthenticated by default, so it must not be reachable from the internet
+  # even with a virtual key configured.
+  - type: pserv
+    name: bifrost
+    runtime: image
+    plan: 0.5c-512mb
+    region: frankfurt
+    image:
+      url: docker.io/maximhq/bifrost:v2.1.1
+    # The governance handler refuses to start without a config store, and the
+    # store needs somewhere to live. Verified by running it: with
+    # `config_store.enabled = false` the container exits 1 with "config store
+    # is required".
+    disk:
+      name: bifrost-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      # base64 of config/bifrost.json; an image service has no repository to
+      # mount a file from. Regenerate whenever that file changes:
+      #   base64 -i config/bifrost.json | tr -d '\n'
+      - key: BIFROST_CONFIG_B64
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LLM_GATEWAY_KEY
+        sync: false
+      - key: BIFROST_SETUP_TOKEN
+        sync: false
+      - key: APP_PORT
+        value: "10000"
+      - key: PORT
+        value: "10000"
+
+databases:
+  - name: platform-db
+    plan: 0.1c-256mb
+    region: frankfurt
+    # Must be explicit: the default is the newest major and cannot be changed later.
+    postgresMajorVersion: "17"
+    ipAllowList: []   # reachable only from inside the private network

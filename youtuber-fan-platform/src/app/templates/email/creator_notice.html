@@ -1,0 +1,20 @@
+{% extends "email/base.html" %}
+{% block subject %}{{ headline }}{% endblock %}
+{% block header_line %}Hinweis von {{ product.name }}{% endblock %}
+{% block content %}
+  <h1>{{ headline }}</h1>
+  {% if video_title %}
+    <p>Es geht um <strong>{{ video_title }}</strong>.</p>
+  {% endif %}
+  <p>{{ explanation }}</p>
+  {% if what_now %}
+    <p>{{ what_now }}</p>
+  {% endif %}
+  {% if action_url %}
+    <p><a class="button" href="{{ action_url }}">{{ action_label }}</a></p>
+  {% endif %}
+  <p>Alle anderen Videos laufen normal weiter — du musst nichts tun.</p>
+{% endblock %}
+{% block footer_reason %}
+  Du bekommst diese Nachricht, weil du {{ product.name }} für deinen Kanal nutzt.
+{% endblock %}
