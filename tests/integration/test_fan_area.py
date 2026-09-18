@@ -426,8 +426,8 @@ class TestUnsubscribe:
         assert "--accent: #333333" in response.text
 
 
-def webhook(client, event: dict, *, secret=SECRET):
-    body = json.dumps(event).encode()
+def webhook(client, event: dict | bytes, *, secret=SECRET):
+    body = event if isinstance(event, bytes) else json.dumps(event).encode()
     message_id, timestamp = "msg_1", str(int(time.time()))
     key = base64.b64decode(secret.removeprefix("whsec_"))
     digest = hmac.new(key, f"{message_id}.{timestamp}.".encode() + body, hashlib.sha256).digest()
@@ -484,13 +484,18 @@ class TestWebhook:
         # confirmation, and a person who reported spam must never get one.
         assert subscriber().blocked_reason == BlockedReason.COMPLAINT
 
-    def test_a_forged_signature_changes_nothing(self, client):
+    def test_a_forged_signature_is_refused_and_changes_nothing(self, client):
+        # 401, not 200: with a wrong secret configured, the provider's dashboard
+        # shows the failures and retries, instead of every bounce vanishing.
         other = "whsec_" + base64.b64encode(b"somebody-else").decode()
 
         response = webhook(client, bounced(), secret=other)
 
-        assert response.status_code == 200
+        assert response.status_code == 401
         assert subscriber().blocked_at is None
+
+    def test_an_unsigned_request_is_refused(self, client):
+        assert client.post("/webhooks/resend", content=b"nonsense").status_code == 401
 
     def test_other_events_and_unknown_addresses_are_ignored(self, client):
         assert (
@@ -505,7 +510,6 @@ class TestWebhook:
 
         assert subscriber().blocked_reason == BlockedReason.BOUNCE
 
-    def test_a_body_that_is_not_json_is_ignored(self, client):
-        response = client.post("/webhooks/resend", content=b"nonsense")
-
-        assert response.status_code == 200
+    def test_a_signed_body_that_is_not_json_is_ignored(self, client):
+        # Retrying would not make it readable; acknowledge and move on.
+        assert webhook(client, b"nonsense").status_code == 200

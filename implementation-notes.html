@@ -830,13 +830,13 @@ jeweils genannten Standard weiter.</p>
   kann ich nicht verifizieren — das steht in Renders Dokumentation und gehört vor M9 geklärt.</p>
 </div>
 
-<div class="entry open">
-  <h4>10. Ungültige Webhook-Signatur beantworten wir mit 200</h4>
-  <p>Plan §10 verlangt „always 200". Ich habe das so umgesetzt: Eine gefälschte Anfrage bekommt keine Erklärung,
-  und der Anbieter wiederholt nichts. Die Kehrseite: Ist <code>RESEND_WEBHOOK_SECRET</code> falsch oder leer, gehen
-  <em>alle</em> Bounce-Meldungen still verloren. Sichtbar ist das nur als WARNING
-  <code>webhook.resend signature_ok=false</code> im Log und im Resend-Dashboard als „erfolgreich zugestellt".</p>
-  <span class="label">Zu bestätigen</span>
-  <p>Entweder so lassen und beim Go-live einmal den Test-Bounce prüfen, oder bei ungültiger Signatur 401 antworten —
-  dann zeigt das Dashboard die Fehlkonfiguration, und Resend wiederholt, bis sie behoben ist.</p>
+<div class="entry">
+  <h4>10. Ungültige Webhook-Signatur: entschieden, 401 statt 200</h4>
+  <p>Plan §10 verlangte „always 200". Die Kehrseite: Wäre <code>RESEND_WEBHOOK_SECRET</code> falsch oder leer,
+  gingen <em>alle</em> Bounce-Meldungen still verloren, und das Resend-Dashboard zeigte sie als erfolgreich
+  zugestellt.</p>
+  <span class="label">Entschieden am 18.09.2026</span>
+  <p>Eine ungültige Signatur bekommt 401. Resend zeigt die Fehlkonfiguration dann im Dashboard an und wiederholt,
+  bis sie behoben ist. Alles gültig Signierte bekommt 200, auch ignorierte Ereignisse und ein unlesbarer Body
+  (eine Wiederholung würde ihn nicht lesbarer machen). Plan §10 und §13 sind angepasst.</p>
 </div>

@@ -29,17 +29,21 @@ async def handle_resend_webhook(request: Request) -> Response:
     ``async`` only to read the raw body: the signature is over the exact bytes,
     not over re-serialised JSON. The database write runs in the threadpool.
 
-    Always 200. The provider delivers at least once and retries anything else;
-    a forged or unreadable request has earned no explanation. No dedup table
-    either: every write is set-to-value, so a replay changes nothing.
+    A bad signature gets 401: with a wrong or missing secret configured, the
+    provider's dashboard then shows the failures and retries, instead of every
+    bounce vanishing behind a 200. Anything signed gets 200, including events
+    we ignore. No dedup table: every write is set-to-value, so the provider's
+    at-least-once delivery and dashboard replays change nothing.
     """
     body = await request.body()
-    signature_ok = verify_webhook_signature(
+    if not verify_webhook_signature(
         body, dict(request.headers), get_settings().secrets.resend_webhook_secret
-    )
-    event = _parse(body) if signature_ok else {}
-    report = logger.info if signature_ok else logger.warning
-    report(log.WEBHOOK_RESEND, type=event.get("type"), signature_ok=signature_ok)
+    ):
+        logger.warning(log.WEBHOOK_RESEND, signature_ok=False)
+        return Response(status_code=401)
+
+    event = _parse(body)
+    logger.info(log.WEBHOOK_RESEND, type=event.get("type"), signature_ok=True)
     reason = _blocking_reason(event)
     if reason is not None:
         addresses = [address.strip().lower() for address in event["data"].get("to", [])]
