@@ -16,7 +16,7 @@ from app import log
 from app.config import Settings, get_settings
 from app.jinja import TEMPLATE_DIR, render_partial
 from app.web.limits import limiter
-from app.web.pages import page
+from app.web.pages import error_page, is_htmx, not_found
 from app.web.routes import creator, fan, public, webhooks
 
 STATIC_DIR = TEMPLATE_DIR.parent / "static"
@@ -39,13 +39,13 @@ RATE_LIMITED = "Gerade kommen sehr viele Anfragen aus deinem Netz. Bitte versuch
 def handle_rate_limited(request: Request, exc: Exception) -> Response:
     """Answer a throttled request in words, without leaking what was throttled.
 
-    A page for a form post, the form's fragment for HTMX — the sign-up page
-    tells htmx to swap a 429 in, so a throttled click is not simply ignored.
+    A page for a form post, a fragment for htmx — the sign-up page tells htmx
+    to swap a 429 in, so a throttled click is not simply ignored.
     """
     logger.warning(log.WEB_RATE_LIMITED, path=request.url.path)
-    if request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         return HTMLResponse(render_partial("rate_limited", message=RATE_LIMITED), status_code=429)
-    return page("error", status_code=429, heading="Kurz durchatmen", message=RATE_LIMITED)
+    return error_page("Kurz durchatmen", RATE_LIMITED, 429)
 
 
 async def handle_control_characters(
@@ -55,12 +55,7 @@ async def handle_control_characters(
     if CONTROL_CHARACTERS.isdisjoint(request.url.path):
         return await call_next(request)
     logger.warning(log.WEB_HOSTILE_PATH)
-    return page(
-        "error",
-        status_code=404,
-        heading="Diese Seite gibt es nicht",
-        message="Der Link stimmt nicht.",
-    )
+    return not_found()
 
 
 async def handle_request_id(

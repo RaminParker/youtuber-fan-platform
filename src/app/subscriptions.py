@@ -16,6 +16,7 @@ Three rules hold it together (plan §10, with the deviations recorded there):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
@@ -43,10 +44,20 @@ from app.tokens import new_token
 logger = log.get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class ConfirmMail:
+    """A confirm mail that is due: everything needed to send it, and to undo."""
+
+    subscription_id: int
+    address: str
+    token: str
+    sent_at: datetime
+
+
 def record_sign_up(
     session: Session, creator: Creator, address: str, now: datetime, settings: Settings
-) -> Subscription | None:
-    """Apply the sign-up rules; return the subscription whose confirm mail is due.
+) -> ConfirmMail | None:
+    """Apply the sign-up rules; return the confirm mail that is now due.
 
     ``None`` means: send nothing, answer as usual — the address is blocked, or
     it was sent a confirm mail within ``web.confirm_resend_minutes``.
@@ -56,13 +67,24 @@ def record_sign_up(
     address
         Already validated and in its stored spelling (``app.addresses``).
     """
-    subscriber = _locked_subscriber(session, address)
+    subscriber = _locked_upsert(session, Subscriber, {"email": address}, "email")
     if subscriber.blocked_at is not None:
         return None
     if _recently_mailed(session, subscriber, now, settings):
         return None
 
-    subscription = _locked_subscription(session, subscriber, creator)
+    subscription = _locked_upsert(
+        session,
+        Subscription,
+        {
+            "subscriber_id": subscriber.id,
+            "creator_id": creator.id,
+            "status": SubscriptionStatus.PENDING,
+            "unsubscribe_token": new_token(),
+        },
+        "subscriber_id",
+        "creator_id",
+    )
     if subscription.status != SubscriptionStatus.CONFIRMED:
         subscription.status = SubscriptionStatus.PENDING
         subscription.confirm_token = new_token()
@@ -70,42 +92,24 @@ def record_sign_up(
         subscription.unsubscribed_at = None
         logger.info(log.SUBSCRIPTION_CREATED, subscription_id=subscription.id)
     subscription.confirm_sent_at = now
-    return subscription
+    return ConfirmMail(subscription.id, address, subscription.confirm_token, now)
 
 
-def _locked_subscriber(session: Session, address: str) -> Subscriber:
-    """Insert the address unless it exists; either way return its row, locked.
+def _locked_upsert[Row](session: Session, model: type[Row], values: dict, *unique: str) -> Row:
+    """Insert a row unless it exists; either way return it, locked.
 
     ``DO UPDATE`` rather than ``DO NOTHING``: it always returns the row and
-    locks it in the same statement. Two sign-ups of one address therefore run
-    one after the other — the second sees the first one's confirm mail and is
-    throttled — and the daily cleanup cannot delete the row in between.
+    locks it in the same statement (the no-op update writes a unique column to
+    itself). Two sign-ups of one address therefore run one after the other —
+    the second sees the first one's confirm mail and is throttled — and the
+    daily cleanup cannot delete the row in between.
     """
-    statement = insert(Subscriber).values(email=address)
+    statement = insert(model).values(**values)
     statement = statement.on_conflict_do_update(
-        index_elements=[Subscriber.email], set_={"email": statement.excluded.email}
+        index_elements=list(unique), set_={unique[-1]: statement.excluded[unique[-1]]}
     )
     return session.scalars(
-        statement.returning(Subscriber), execution_options={"populate_existing": True}
-    ).one()
-
-
-def _locked_subscription(
-    session: Session, subscriber: Subscriber, creator: Creator
-) -> Subscription:
-    """Do the same for this address and this creator."""
-    statement = insert(Subscription).values(
-        subscriber_id=subscriber.id,
-        creator_id=creator.id,
-        status=SubscriptionStatus.PENDING,
-        unsubscribe_token=new_token(),
-    )
-    statement = statement.on_conflict_do_update(
-        index_elements=[Subscription.subscriber_id, Subscription.creator_id],
-        set_={"creator_id": statement.excluded.creator_id},
-    )
-    return session.scalars(
-        statement.returning(Subscription), execution_options={"populate_existing": True}
+        statement.returning(model), execution_options={"populate_existing": True}
     ).one()
 
 
@@ -126,36 +130,38 @@ def _recently_mailed(
     return last_sent is not None and last_sent + window > now
 
 
-def send_confirm_mail(subscription_id: int) -> None:
-    """Send the confirm mail for a committed sign-up.
+def send_confirm_mail(creator: Creator, due: ConfirmMail) -> None:
+    """Send a confirm mail once the sign-up is committed and answered.
 
     Runs after the response has gone out, so the answer takes as long for a
     blocked or throttled address — which sends nothing — as for a new one: the
-    response time must not reveal who is subscribed or who complained. On
-    failure the throttle is released, because no mail left.
+    response time must not reveal who is subscribed or who complained. Needs
+    no database read: the request already had everything. On failure the
+    throttle is released, because no mail left.
+
+    ``# ponytail: the same send-then-undo shape as the magic link in
+    web/routes/creator.py; extract a helper when a third mail needs it.``
     """
     settings = get_settings()
-    with session_scope() as session:
-        subscription = session.get(Subscription, subscription_id)
-        creator = session.get(Creator, subscription.creator_id)
-        link = f"{settings.base_url}/k/{creator.slug}/bestaetigen/{subscription.confirm_token}"
-        mail = render_confirm_mail(creator, subscription.subscriber.email, link, settings)
-        sent_at = subscription.confirm_sent_at
+    link = f"{settings.base_url}/k/{creator.slug}/bestaetigen/{due.token}"
     try:
-        get_services().email.send(mail)
+        get_services().email.send(render_confirm_mail(creator, due.address, link, settings))
     except Exception:
-        logger.exception(log.SUBSCRIPTION_CONFIRM_FAILED, subscription_id=subscription_id)
-        _release_throttle(subscription_id, sent_at)
+        logger.exception(log.SUBSCRIPTION_CONFIRM_FAILED, subscription_id=due.subscription_id)
+        _release_throttle(due)
         return
-    logger.info(log.SUBSCRIPTION_CONFIRM_SENT, subscription_id=subscription_id)
+    logger.info(log.SUBSCRIPTION_CONFIRM_SENT, subscription_id=due.subscription_id)
 
 
-def _release_throttle(subscription_id: int, sent_at: datetime | None) -> None:
+def _release_throttle(due: ConfirmMail) -> None:
     """Undo ``confirm_sent_at`` — unless a later sign-up has set it anew."""
     with session_scope() as session:
         session.execute(
             update(Subscription)
-            .where(Subscription.id == subscription_id, Subscription.confirm_sent_at == sent_at)
+            .where(
+                Subscription.id == due.subscription_id,
+                Subscription.confirm_sent_at == due.sent_at,
+            )
             .values(confirm_sent_at=None)
         )
 

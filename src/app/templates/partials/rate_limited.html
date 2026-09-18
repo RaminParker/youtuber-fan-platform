@@ -1,4 +1,3 @@
-{# Takes the sign-up form's place when the per-IP limit answers 429. #}
-<div id="signup">
-  <p role="alert" tabindex="-1" autofocus>{{ message }}</p>
-</div>
+{# Swapped in wherever the throttled form sat (htmx knows the target), so it
+   carries no id of its own and fits any form behind a rate limit. #}
+<p role="alert" tabindex="-1" autofocus>{{ message }}</p>

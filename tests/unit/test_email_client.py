@@ -20,7 +20,6 @@ from app.delivery.render import OutgoingEmail
 from app.errors import TemporaryError
 from tests.fakes import WEBHOOK_SECRET, svix_headers
 
-SECRET = WEBHOOK_SECRET
 NOW = 1_789_000_000.0
 
 
@@ -157,20 +156,22 @@ class TestWebhookSignature:
     """A forged webhook could block every subscriber on the platform."""
 
     @staticmethod
-    def sign(body: bytes, message_id="msg_1", timestamp=str(int(NOW)), secret=SECRET):
+    def sign(body: bytes, message_id="msg_1", timestamp=str(int(NOW)), secret=WEBHOOK_SECRET):
         return svix_headers(body, secret, message_id=message_id, timestamp=timestamp)
 
     def test_a_genuine_signature_is_accepted(self):
         body = b'{"type":"email.bounced"}'
 
-        assert verify_webhook_signature(body, self.sign(body), SECRET, now=NOW) is True
+        assert verify_webhook_signature(body, self.sign(body), WEBHOOK_SECRET, now=NOW) is True
 
     def test_a_changed_body_is_rejected(self):
         body = b'{"type":"email.bounced"}'
         headers = self.sign(body)
 
         assert (
-            verify_webhook_signature(b'{"type":"email.delivered"}', headers, SECRET, now=NOW)
+            verify_webhook_signature(
+                b'{"type":"email.delivered"}', headers, WEBHOOK_SECRET, now=NOW
+            )
             is False
         )
 
@@ -179,7 +180,8 @@ class TestWebhookSignature:
         other = "whsec_" + base64.b64encode(b"a-different-secret-entirely").decode()
 
         assert (
-            verify_webhook_signature(body, self.sign(body, secret=other), SECRET, now=NOW) is False
+            verify_webhook_signature(body, self.sign(body, secret=other), WEBHOOK_SECRET, now=NOW)
+            is False
         )
 
     def test_an_old_request_is_rejected(self):
@@ -188,7 +190,8 @@ class TestWebhookSignature:
         old = str(int(NOW - WEBHOOK_TOLERANCE_SECONDS - 1))
 
         assert (
-            verify_webhook_signature(body, self.sign(body, timestamp=old), SECRET, now=NOW) is False
+            verify_webhook_signature(body, self.sign(body, timestamp=old), WEBHOOK_SECRET, now=NOW)
+            is False
         )
 
     def test_a_request_from_just_inside_the_window_is_accepted(self):
@@ -196,7 +199,9 @@ class TestWebhookSignature:
         recent = str(int(NOW - WEBHOOK_TOLERANCE_SECONDS + 10))
 
         assert (
-            verify_webhook_signature(body, self.sign(body, timestamp=recent), SECRET, now=NOW)
+            verify_webhook_signature(
+                body, self.sign(body, timestamp=recent), WEBHOOK_SECRET, now=NOW
+            )
             is True
         )
 
@@ -206,7 +211,7 @@ class TestWebhookSignature:
         headers = self.sign(body)
         headers["svix-signature"] = "v1,Zm9yZ2VkCg== " + headers["svix-signature"]
 
-        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is True
+        assert verify_webhook_signature(body, headers, WEBHOOK_SECRET, now=NOW) is True
 
     @pytest.mark.parametrize("missing", ["svix-id", "svix-timestamp", "svix-signature"])
     def test_a_missing_header_is_rejected(self, missing):
@@ -214,14 +219,14 @@ class TestWebhookSignature:
         headers = self.sign(body)
         del headers[missing]
 
-        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is False
+        assert verify_webhook_signature(body, headers, WEBHOOK_SECRET, now=NOW) is False
 
     def test_a_nonsense_timestamp_is_rejected(self):
         body = b"{}"
         headers = self.sign(body)
         headers["svix-timestamp"] = "not-a-number"
 
-        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is False
+        assert verify_webhook_signature(body, headers, WEBHOOK_SECRET, now=NOW) is False
 
     @pytest.mark.parametrize("secret", ["", "whsec_not-base64!!", "nonsense"])
     def test_an_unusable_secret_rejects_instead_of_raising(self, secret):
@@ -246,10 +251,10 @@ class TestWebhookSignature:
         headers = self.sign(body)
         headers["svix-signature"] = "v1,\xe4"
 
-        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is False
+        assert verify_webhook_signature(body, headers, WEBHOOK_SECRET, now=NOW) is False
 
     def test_header_case_does_not_matter(self):
         body = b"{}"
         headers = {k.upper(): v for k, v in self.sign(body).items()}
 
-        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is True
+        assert verify_webhook_signature(body, headers, WEBHOOK_SECRET, now=NOW) is True

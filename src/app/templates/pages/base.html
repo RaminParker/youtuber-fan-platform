@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="page" style="--accent: {{ accent_color|default('#333333', true) }}">
+  {# A fan page wears its creator's colour; every other page, ours. #}
+  <main class="page" style="--accent: {{ creator.accent_color if creator is defined and creator else '#333333' }}">
     {% block content %}{% endblock %}
   </main>
 </body>

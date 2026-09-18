@@ -25,11 +25,6 @@ KEYS = "4Xk8vQJ7mZp0sT2aB9cD5eF1gH3iJ6kL8mN0oP2qR4s="
 
 
 @pytest.fixture
-def mailer():
-    return FakeEmailClient()
-
-
-@pytest.fixture
 def client(committed_database, monkeypatch, mailer, fake_services):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEYS", KEYS)
     monkeypatch.setenv("BASE_URL", "http://testserver")

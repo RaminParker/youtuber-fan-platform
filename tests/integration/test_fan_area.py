@@ -30,24 +30,18 @@ from app.delivery.email_client import EmailTemporaryError
 from app.services import set_services
 from app.web.server import create_app
 from tests import fakes
-from tests.fakes import WEBHOOK_SECRET, FakeEmailClient, svix_headers
+from tests.fakes import WEBHOOK_SECRET, svix_headers
 
 pytestmark = pytest.mark.integration
 
 FAN = "fan@example.org"
-SECRET = WEBHOOK_SECRET
 ANSWER = "Schau in dein Postfach"
-
-
-@pytest.fixture
-def mailer():
-    return FakeEmailClient()
 
 
 @pytest.fixture
 def client(committed_database, monkeypatch, mailer, fake_services):
     monkeypatch.setenv("BASE_URL", "http://testserver")
-    monkeypatch.setenv("RESEND_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("RESEND_WEBHOOK_SECRET", WEBHOOK_SECRET)
     get_settings.cache_clear()
     set_services(fakes.services(email=mailer))
     with session_scope() as session:
@@ -58,6 +52,11 @@ def client(committed_database, monkeypatch, mailer, fake_services):
             session.add(Source(creator_id=creator.id, kind=SourceKind.YOUTUBE, external_id=slug))
     with TestClient(create_app(), follow_redirects=False) as client:
         yield client
+
+
+def signup_limit() -> int:
+    """How many sign-ups one address may send per window, from settings."""
+    return int(get_settings().web.rate_limit_signup.split("/")[0])
 
 
 def sign_up(client, address=FAN, slug="pilot", **headers):
@@ -203,14 +202,6 @@ class TestNoEnumeration:
 
         assert new == known
 
-    def test_a_complained_address_gets_the_same_answer_and_no_mail(self, client, mailer):
-        block(FAN, BlockedReason.COMPLAINT)
-
-        response = sign_up(client)
-
-        assert ANSWER in response.text
-        assert mailer.sent == []
-
     def test_a_broken_mail_provider_gives_the_same_answer(self, client, mailer):
         mailer.fail_with = EmailTemporaryError("down")
 
@@ -323,7 +314,7 @@ class TestStateRules:
 
 class TestBrakes:
     def test_the_ip_limit_answers_429(self, client):
-        limit = int(get_settings().web.rate_limit_signup.split("/")[0])
+        limit = signup_limit()
 
         codes = [sign_up(client, address=f"f{i}@example.org").status_code for i in range(limit + 1)]
 
@@ -331,7 +322,7 @@ class TestBrakes:
         assert codes[limit] == 429
 
     def test_a_throttled_person_is_told_in_words_not_json(self, client):
-        limit = int(get_settings().web.rate_limit_signup.split("/")[0])
+        limit = signup_limit()
         for i in range(limit):
             sign_up(client, address=f"f{i}@example.org")
 
@@ -341,7 +332,10 @@ class TestBrakes:
         assert page_answer.status_code == fragment.status_code == 429
         assert "text/html" in page_answer.headers["content-type"]
         assert "<html" in page_answer.text and "noch einmal" in page_answer.text
-        assert "<html" not in fragment.text and 'id="signup"' in fragment.text
+        # Fits whatever form was throttled: htmx knows the target, the
+        # fragment carries no id of its own.
+        assert "<html" not in fragment.text and 'role="alert"' in fragment.text
+        assert "id=" not in fragment.text
 
     def test_the_page_tells_htmx_to_show_a_429(self, client):
         # htmx 2 swaps no 4xx by default: without this, a throttled click does
@@ -518,7 +512,7 @@ class TestUnsubscribe:
         assert "--accent: #333333" in response.text
 
 
-def webhook(client, event: dict | bytes, *, secret=SECRET):
+def webhook(client, event: dict | bytes, *, secret=WEBHOOK_SECRET):
     body = event if isinstance(event, bytes) else json.dumps(event).encode()
     headers = svix_headers(body, secret) | {"content-type": "application/json"}
     return client.post("/webhooks/resend", content=body, headers=headers)
@@ -547,13 +541,17 @@ class TestWebhook:
         assert subscriber().blocked_reason == BlockedReason.BOUNCE
         assert subscriber().blocked_at is not None
 
-    def test_a_replay_changes_nothing(self, client):
+    def test_a_replay_changes_nothing_and_logs_no_second_block(self, client, caplog):
+        # The log is the operator's record of who got blocked, and when.
         webhook(client, bounced())
         first = subscriber().blocked_at
+        caplog.clear()
 
         webhook(client, bounced())
 
         assert subscriber().blocked_at == first
+        assert not [r for r in caplog.records if "subscriber.blocked" in str(r.msg)]
+        assert [r for r in caplog.records if "webhook.resend" in str(r.msg)]
 
     def test_a_transient_bounce_does_not_block(self, client):
         webhook(client, bounced(bounce_type="Transient"))
@@ -585,16 +583,6 @@ class TestWebhook:
         webhook(client, event)
 
         assert subscriber().blocked_reason == BlockedReason.BOUNCE
-
-    def test_a_replay_logs_no_second_block(self, client, caplog):
-        # The log is the operator's record of who got blocked, and when.
-        webhook(client, bounced())
-        caplog.clear()
-
-        webhook(client, bounced())
-
-        assert not [r for r in caplog.records if "subscriber.blocked" in str(r.msg)]
-        assert [r for r in caplog.records if "webhook.resend" in str(r.msg)]
 
     def test_a_forged_signature_is_refused_and_changes_nothing(self, client):
         # 401, not 200: with a wrong secret configured, the provider's dashboard

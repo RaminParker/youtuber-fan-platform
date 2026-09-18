@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fastapi import Request
 from fastapi.responses import HTMLResponse
 
 from app.jinja import render_page
@@ -23,3 +24,18 @@ def page(
         Response headers. The summary page uses it to stay out of search.
     """
     return HTMLResponse(render_page(template, **context), status_code=status_code, headers=headers)
+
+
+def is_htmx(request: Request) -> bool:
+    """Whether htmx sent this request and expects a fragment, not a page."""
+    return request.headers.get("HX-Request") == "true"
+
+
+def error_page(heading: str, message: str, code: int, **context) -> HTMLResponse:
+    """Render a branded error page rather than a bare status line."""
+    return page("error", status_code=code, heading=heading, message=message, **context)
+
+
+def not_found() -> HTMLResponse:
+    """Answer a link that leads nowhere — one wording for every route and middleware."""
+    return error_page("Diese Seite gibt es nicht", "Der Link stimmt nicht.", 404)

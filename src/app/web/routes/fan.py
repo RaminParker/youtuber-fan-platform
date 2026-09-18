@@ -30,7 +30,7 @@ from app.delivery.render import jump_link
 from app.jinja import render_partial
 from app.web.deps import DbSession
 from app.web.limits import limiter, signup_limit
-from app.web.pages import page
+from app.web.pages import error_page, is_htmx, not_found, page
 
 router = APIRouter(tags=["fan"])
 logger = log.get_logger(__name__)
@@ -47,22 +47,17 @@ PAGE_VARIANT = "detailed"
 NO_INDEX = "noindex, nofollow"
 
 
-def error_page(heading: str, message: str, code: int) -> HTMLResponse:
-    """Render a branded error page rather than a bare status line."""
-    return page("error", status_code=code, heading=heading, message=message)
-
-
 def _creator(session: Session, slug: str) -> Creator | None:
     return session.scalar(select(Creator).where(Creator.slug == slug))
 
 
 @router.get("/k/{slug}", response_class=HTMLResponse)
-def handle_signup_page(slug: str, session: DbSession) -> HTMLResponse:
+def handle_signup_page(request: Request, slug: str, session: DbSession) -> HTMLResponse:
     """Show the creator's sign-up page: one field, one button, three sentences."""
     creator = _creator(session, slug)
     if creator is None:
-        return error_page("Diese Seite gibt es nicht", "Der Link stimmt nicht.", 404)
-    return _signup_answer(None, creator)
+        return not_found()
+    return _signup_answer(request, creator)
 
 
 @router.post("/k/{slug}", response_class=HTMLResponse)
@@ -83,37 +78,34 @@ def handle_signup(
     sent after it (``send_confirm_mail``), so it never carries a token the
     database does not have — and the response time reveals nothing.
     """
-    creator = _creator(session, slug)
-    if creator is None:
-        return error_page("Diese Seite gibt es nicht", "Der Link stimmt nicht.", 404)
-
+    # Before the first query: the MX lookup can take seconds, and must not
+    # hold a pooled connection idle in a transaction while it waits.
     try:
         address = validate(email, check_dns=settings.web.check_address_dns)
     except InvalidAddress as error:
         logger.info(log.SUBSCRIPTION_ADDRESS_REJECTED, reason=str(error))
+        address = None
+
+    creator = _creator(session, slug)
+    if creator is None:
+        return not_found()
+    if address is None:
         return _signup_answer(request, creator, error=INVALID_ADDRESS, email=email)
 
-    subscription = subscriptions.record_sign_up(
-        session, creator, address, datetime.now(UTC), settings
-    )
-    if subscription is not None:
-        background.add_task(subscriptions.send_confirm_mail, subscription.id)
+    due = subscriptions.record_sign_up(session, creator, address, datetime.now(UTC), settings)
+    if due is not None:
+        background.add_task(subscriptions.send_confirm_mail, creator, due)
     return _signup_answer(request, creator, sent=True)
 
 
 def _signup_answer(
-    request: Request | None,
-    creator: Creator,
-    *,
-    sent: bool = False,
-    error: str = "",
-    email: str = "",
+    request: Request, creator: Creator, *, sent: bool = False, error: str = "", email: str = ""
 ) -> HTMLResponse:
-    """Answer with the whole page, or only the form's place in it when HTMX asked."""
+    """Answer with the whole page, or only the form's place in it when htmx asked."""
     context = {"creator": creator, "sent": sent, "error": error, "email": email}
-    if request is not None and request.headers.get("HX-Request") == "true":
+    if is_htmx(request):
         return HTMLResponse(render_partial("signup_form", **context))
-    return page("signup", accent_color=creator.accent_color, **context)
+    return page("signup", **context)
 
 
 @router.get("/k/{slug}/bestaetigen/{token}", response_class=HTMLResponse)
@@ -130,7 +122,6 @@ def handle_confirm(slug: str, token: str, session: DbSession) -> HTMLResponse:
         .where(Subscription.confirm_token == token, Creator.slug == slug)
     ).first()
     if found is None or not subscriptions.confirmable(found.Subscription, now):
-        creator = _creator(session, slug)
         return page(
             "action_confirm",
             status_code=status.HTTP_410_GONE,
@@ -139,7 +130,7 @@ def handle_confirm(slug: str, token: str, session: DbSession) -> HTMLResponse:
             action=f"/k/{slug}",
             label="Neu eintragen",
             method="get",
-            accent_color=creator.accent_color if creator else None,
+            creator=_creator(session, slug),
         )
     subscription, creator = found
 
@@ -147,7 +138,6 @@ def handle_confirm(slug: str, token: str, session: DbSession) -> HTMLResponse:
     return page(
         "confirmed",
         creator=creator,
-        accent_color=creator.accent_color,
         newest_view_token=subscriptions.newest_received_summary(session, creator),
     )
 
@@ -162,7 +152,7 @@ def handle_unsubscribe_page(token: str, session: DbSession) -> HTMLResponse:
         body=f"Ein Klick, und du bekommst von {_channel(creator)} keine Zusammenfassungen mehr.",
         action=f"/abmelden/{token}",
         label="Abmelden",
-        accent_color=creator.accent_color if creator else None,
+        creator=creator,
     )
 
 
@@ -174,12 +164,12 @@ def handle_unsubscribe(token: str, session: DbSession) -> HTMLResponse:
     error, and the token is the only thing this could reveal anything about.
     """
     creator = subscriptions.unsubscribe(session, token, datetime.now(UTC))
-    return page(
-        "error",
-        heading="Du bist abgemeldet",
-        message=f"Von {_channel(creator)} kommen keine Zusammenfassungen mehr. "
+    return error_page(
+        "Du bist abgemeldet",
+        f"Von {_channel(creator)} kommen keine Zusammenfassungen mehr. "
         "Du kannst dich jederzeit wieder eintragen.",
-        accent_color=creator.accent_color if creator else None,
+        200,
+        creator=creator,
     )
 
 
@@ -206,7 +196,7 @@ def handle_summary_page(
     """
     found = _appearance_and_creator(session, view_token)
     if found is None:
-        return error_page("Diese Seite gibt es nicht", "Der Link stimmt nicht.", 404)
+        return not_found()
     appearance, creator = found
 
     if appearance.status == AppearanceStatus.UNAVAILABLE:
@@ -226,7 +216,6 @@ def handle_summary_page(
     return page(
         "summary",
         creator=creator,
-        accent_color=creator.accent_color,
         appearance=appearance,
         summary=summary,
         sentiment=sentiment,

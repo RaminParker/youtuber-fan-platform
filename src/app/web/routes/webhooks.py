@@ -24,11 +24,6 @@ from app.delivery.email_client import verify_webhook_signature
 router = APIRouter(tags=["webhooks"])
 logger = log.get_logger(__name__)
 
-#: ``email.suppressed``: the provider skipped the send because the address is
-#: on its account-wide list — from an earlier bounce, possibly one this
-#: database has since forgotten. Sending there again is pointless either way.
-BOUNCE_EVENTS = ("email.bounced", "email.suppressed")
-
 
 @router.post("/webhooks/resend")
 async def handle_resend_webhook(request: Request) -> Response:
@@ -84,9 +79,11 @@ def _blocking_reason(event_type: object, data: dict) -> BlockedReason | None:
     """Only a permanent bounce blocks; a full mailbox or a greylisting does not."""
     if event_type == "email.complained":
         return BlockedReason.COMPLAINT
-    if event_type == "email.bounced" and _object(data.get("bounce")).get("type") != "Permanent":
-        return None
-    if event_type in BOUNCE_EVENTS:
+    if event_type == "email.suppressed":
+        # The provider skipped the send: the address is on its account-wide
+        # list, from a bounce this database may since have forgotten.
+        return BlockedReason.BOUNCE
+    if event_type == "email.bounced" and _object(data.get("bounce")).get("type") == "Permanent":
         return BlockedReason.BOUNCE
     return None
 

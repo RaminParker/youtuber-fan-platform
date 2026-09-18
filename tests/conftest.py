@@ -21,6 +21,7 @@ from app.db import engine as db_engine
 from app.db.models import Base
 from app.services import set_services
 from app.web.limits import limiter
+from tests.fakes import FakeEmailClient
 
 REQUIRED_SECRETS = {
     "DATABASE_URL": "postgresql+psycopg://app:app@localhost:5432/app_test",
@@ -139,6 +140,12 @@ def committed_database(
         with migrated_engine.begin() as connection:
             connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
         db_engine.reset_engine()
+
+
+@pytest.fixture
+def mailer() -> FakeEmailClient:
+    """Collects the mails a test would have sent."""
+    return FakeEmailClient()
 
 
 @pytest.fixture

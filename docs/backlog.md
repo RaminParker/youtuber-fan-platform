@@ -49,6 +49,7 @@ for its ceiling. Find them all with `grep -rn "ponytail:" src/`.
 | `delivery/email_client.py` (`send_batch`) | one address the provider rejects blocks a whole mailing | it happens once → per-address handling |
 | `web/routes/fan.py` (`/s/`) | no per-state visibility check on summary pages | view tokens leave mails, previews and the confirmation page |
 | `addresses.py` | the local part is lower-cased too | a real provider turns out to be case-sensitive |
+| `subscriptions.py` (`send_confirm_mail`) | "send after the answer, undo on failure" is written twice (confirm mail, magic link) | a third mail needs it (M6 preview, contact form) → one `send_or_undo` helper |
 
 ## Known limits, accepted for now
 

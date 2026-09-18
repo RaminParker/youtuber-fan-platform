@@ -82,7 +82,7 @@ def handle_login_request(
         return page("creator_login", sent=True, message=SIGN_IN_ANSWER)
     creator = session.scalar(select(Creator).where(Creator.contact_email == address))
     if creator is not None and _needs_a_new_link(creator):
-        background.add_task(_send_magic_link, creator.id, _issue_magic_link(creator, settings))
+        background.add_task(_send_magic_link, creator, _issue_magic_link(creator, settings))
     return page("creator_login", sent=True, message=SIGN_IN_ANSWER)
 
 
@@ -100,32 +100,31 @@ def _needs_a_new_link(creator: Creator) -> bool:
 
 
 def _issue_magic_link(creator: Creator, settings: Settings) -> str:
-    """Store a fresh single-use token (hashed) and return the link carrying it."""
+    """Store a fresh single-use token (hashed) and return it."""
     token = new_token()
     creator.magic_link_token_hash = hash_token(token)
     creator.magic_link_expires_at = datetime.now(UTC) + timedelta(
         minutes=settings.email.magic_link_minutes
     )
-    return f"{settings.base_url}/creator/login/{token}"
+    return token
 
 
-def _send_magic_link(creator_id: int, link: str) -> None:
-    """Mail the link once the answer has gone out.
+def _send_magic_link(creator: Creator, token: str) -> None:
+    """Mail the link once the answer has gone out; the request already had the creator.
 
     On failure the link is withdrawn: "one link at a time" must not count a
     link that never left, or a provider hiccup locks the creator out for the
     link's whole lifetime.
     """
     settings = get_settings()
-    with session_scope() as session:
-        mail = render_magic_link_mail(session.get(Creator, creator_id), link, settings)
+    link = f"{settings.base_url}/creator/login/{token}"
     try:
-        get_services().email.send(mail)
+        get_services().email.send(render_magic_link_mail(creator, link, settings))
     except Exception:
-        logger.exception(log.CREATOR_MAGIC_LINK_FAILED, creator_id=creator_id)
-        _withdraw_magic_link(creator_id, hash_token(link.rsplit("/", 1)[1]))
+        logger.exception(log.CREATOR_MAGIC_LINK_FAILED, creator_id=creator.id)
+        _withdraw_magic_link(creator.id, hash_token(token))
         return
-    logger.info(log.CREATOR_MAGIC_LINK_SENT, creator_id=creator_id)
+    logger.info(log.CREATOR_MAGIC_LINK_SENT, creator_id=creator.id)
 
 
 def _withdraw_magic_link(creator_id: int, token_hash: str) -> None:
