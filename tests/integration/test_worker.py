@@ -306,13 +306,47 @@ class TestPollFailure:
             assert run.last_run_at == NOW
 
 
-class TestCleanupSchedule:
-    def test_the_tick_runs_the_cleanup_once_a_day(self, pilot, fake_services):
+class TestPeriodicSchedule:
+    @staticmethod
+    def last_run(name: str):
+        with session_scope() as session:
+            return session.get(JobRun, name).last_run_at
+
+    def test_the_cleanup_runs_once_a_day(self, pilot, fake_services):
         set_services(fakes.services())
 
         with mock_feed(lambda channel_id, client=None: []):
             worker.run_tick(NOW, get_settings())
             worker.run_tick(NOW + timedelta(hours=23), get_settings())
+            assert self.last_run(steps.CLEANUP) == NOW
 
-        with session_scope() as session:
-            assert session.get(JobRun, steps.CLEANUP).last_run_at == NOW
+            worker.run_tick(NOW + timedelta(hours=24), get_settings())
+            assert self.last_run(steps.CLEANUP) == NOW + timedelta(hours=24)
+
+    def test_a_job_that_crashes_waits_for_its_interval(self, pilot, fake_services):
+        # An unexpected error — a feed answering with HTML, say — must not turn
+        # a six-hourly poll into a once-a-minute one with a traceback each time.
+        set_services(fakes.services())
+        calls = []
+
+        def crash(channel_id, client=None):
+            calls.append(channel_id)
+            raise ValueError("not a feed")
+
+        with mock_feed(crash):
+            worker.run_tick(NOW, get_settings())
+            worker.run_tick(NOW + timedelta(minutes=1), get_settings())
+
+        assert len(calls) == 1
+        assert self.last_run(steps.POLL_FEEDS) == NOW
+
+    def test_one_crashing_job_does_not_cost_the_other_its_run(self, pilot, fake_services):
+        set_services(fakes.services())
+
+        def crash(channel_id, client=None):
+            raise ValueError("not a feed")
+
+        with mock_feed(crash):
+            worker.run_tick(NOW, get_settings())
+
+        assert self.last_run(steps.CLEANUP) == NOW

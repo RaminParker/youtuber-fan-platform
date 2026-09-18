@@ -1,16 +1,16 @@
 """The fan area: double opt-in, unsubscribing, and the bounce webhook."""
 
 import base64
-import hashlib
-import hmac
 import json
-import time
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app import subscriptions
+from app.addresses import canonical
 from app.config import get_settings
 from app.db.engine import session_scope
 from app.db.models import (
@@ -30,12 +30,12 @@ from app.delivery.email_client import EmailTemporaryError
 from app.services import set_services
 from app.web.server import create_app
 from tests import fakes
-from tests.fakes import FakeEmailClient
+from tests.fakes import WEBHOOK_SECRET, FakeEmailClient, svix_headers
 
 pytestmark = pytest.mark.integration
 
 FAN = "fan@example.org"
-SECRET = "whsec_" + base64.b64encode(b"a-shared-secret-for-webhooks").decode()
+SECRET = WEBHOOK_SECRET
 ANSWER = "Schau in dein Postfach"
 
 
@@ -80,9 +80,9 @@ def subscription(slug="pilot", address=FAN) -> Subscription | None:
         return found
 
 
-def update_subscription(**values) -> None:
+def update_subscription(slug="pilot", **values) -> None:
     with session_scope() as session:
-        row = session.get(Subscription, subscription().id)
+        row = session.get(Subscription, subscription(slug=slug).id)
         for key, value in values.items():
             setattr(row, key, value)
 
@@ -164,11 +164,28 @@ class TestDoubleOptIn:
         assert "/static/htmx.min.js" in client.get("/k/pilot").text
         assert client.get("/static/htmx.min.js").status_code == 200
 
-    def test_an_invalid_address_sends_nothing(self, client, mailer):
-        response = sign_up(client, address="not-an-address")
+    @pytest.mark.parametrize("address", ["not-an-address", "<fan@example.org>", "fan@example"])
+    def test_an_invalid_address_sends_nothing(self, client, mailer, address):
+        response = sign_up(client, address=address)
 
-        assert "gültige E-Mail-Adresse" in response.text
+        assert "Bitte prüf deine E-Mail-Adresse" in response.text
         assert mailer.sent == []
+        assert subscriber(canonical(address)) is None
+
+    def test_the_error_keeps_what_was_typed_and_takes_the_focus(self, client):
+        # Retyping a whole address because of one typo is the kind of friction
+        # that makes people give up; the focus puts a screen reader on the error.
+        response = sign_up(client, address="anna@gmail", **{"HX-Request": "true"})
+
+        assert 'value="anna@gmail"' in response.text
+        assert 'aria-invalid="true"' in response.text
+        assert "autofocus" in response.text
+
+    def test_the_answer_takes_the_focus_so_it_is_announced(self, client):
+        response = sign_up(client, **{"HX-Request": "true"})
+
+        assert 'role="status"' in response.text
+        assert "autofocus" in response.text
 
     def test_an_unknown_creator_is_a_404(self, client, mailer):
         assert sign_up(client, slug="nobody").status_code == 404
@@ -257,18 +274,40 @@ class TestStateRules:
         client.get(link)
         client.post(f"/abmelden/{subscription().unsubscribe_token}")
 
-        client.get(link)
+        page = client.get(link)
 
         assert subscription().status == SubscriptionStatus.UNSUBSCRIBED
+        # And the page must not claim otherwise.
+        assert page.status_code == 410
+        assert "Dabei" not in page.text
 
-    def test_a_bounced_address_gets_the_mail_and_confirming_lifts_the_block(self, client, mailer):
-        block(FAN, BlockedReason.BOUNCE)
+    @pytest.mark.parametrize("reason", [BlockedReason.BOUNCE, BlockedReason.COMPLAINT])
+    def test_a_blocked_address_gets_the_same_answer_and_no_mail(self, client, mailer, reason):
+        # Both blocks mirror the mail provider's suppression list, which does
+        # not expire: a mail there would be dropped, and repeated attempts cost
+        # the reputation every creator shares.
+        block(FAN, reason)
+
+        response = sign_up(client)
+
+        assert ANSWER in response.text
+        assert mailer.sent == []
+        assert subscriber().blocked_reason == reason
+
+    def test_a_confirmed_fan_who_bounced_stays_blocked(self, client, mailer):
+        sign_up(client)
+        link = confirm_path(mailer)
+        client.get(link)
+        with session_scope() as session:
+            row = session.scalar(select(Subscriber))
+            row.blocked_at, row.blocked_reason = datetime.now(UTC), BlockedReason.BOUNCE
+        update_subscription(confirm_sent_at=None)
 
         sign_up(client)
-        client.get(confirm_path(mailer))
+        client.get(link)
 
-        assert subscriber().blocked_at is None
-        assert subscriber().blocked_reason is None
+        assert len(mailer.sent) == 1
+        assert subscriber().blocked_reason == BlockedReason.BOUNCE
 
     def test_a_complaint_block_is_never_lifted(self, client, mailer):
         sign_up(client)
@@ -291,6 +330,24 @@ class TestBrakes:
         assert codes[:limit] == [200] * limit
         assert codes[limit] == 429
 
+    def test_a_throttled_person_is_told_in_words_not_json(self, client):
+        limit = int(get_settings().web.rate_limit_signup.split("/")[0])
+        for i in range(limit):
+            sign_up(client, address=f"f{i}@example.org")
+
+        page_answer = sign_up(client)
+        fragment = sign_up(client, **{"HX-Request": "true"})
+
+        assert page_answer.status_code == fragment.status_code == 429
+        assert "text/html" in page_answer.headers["content-type"]
+        assert "<html" in page_answer.text and "noch einmal" in page_answer.text
+        assert "<html" not in fragment.text and 'id="signup"' in fragment.text
+
+    def test_the_page_tells_htmx_to_show_a_429(self, client):
+        # htmx 2 swaps no 4xx by default: without this, a throttled click does
+        # nothing at all, and the person clicks again.
+        assert '"code":"429","swap":true' in client.get("/k/pilot").text
+
     def test_one_confirm_mail_per_address_and_window(self, client, mailer):
         for _ in range(3):
             response = sign_up(client)
@@ -307,27 +364,46 @@ class TestBrakes:
 
         assert len(mailer.sent) == 2
 
-    def test_the_window_is_per_creator(self, client, mailer):
+    def test_the_window_is_per_address_across_creators(self, client, mailer):
+        # Otherwise every creator on the platform is one more mail per window
+        # into a stranger's inbox.
         sign_up(client)
         sign_up(client, slug="other")
 
-        assert len(mailer.sent) == 2
+        assert len(mailer.sent) == 1
+        assert subscription(slug="other") is None
+
+    def test_confirmed_fans_are_throttled_too(self, client, mailer):
+        sign_up(client)
+        client.get(confirm_path(mailer))
+
+        sign_up(client)
+
+        assert len(mailer.sent) == 1
 
 
 class TestConfirmationPageLink:
     """The page may only hand out what the list has already received."""
 
     @staticmethod
-    def add_video(video_id, *, days_ago, backfill=False, mailing=None):
+    def add_video(
+        video_id,
+        *,
+        days_ago,
+        backfill=False,
+        mailing=None,
+        status=AppearanceStatus.ANALYZED,
+        channel="pilot",
+    ):
         with session_scope() as session:
-            source = session.scalar(select(Source).where(Source.external_id == "pilot"))
+            source = session.scalar(select(Source).where(Source.external_id == channel))
             appearance = Appearance(
                 source_id=source.id,
                 external_id=video_id,
                 title=video_id,
                 url=f"https://www.youtube.com/watch?v={video_id}",
                 published_at=datetime.now(UTC) - timedelta(days=days_ago),
-                status=AppearanceStatus.ANALYZED,
+                status=status,
                 is_backfill=backfill,
                 view_token=f"token-{video_id}",
             )
@@ -353,8 +429,23 @@ class TestConfirmationPageLink:
 
         assert "/s/token-sentvideo00" in self.confirmed_page(client, mailer)
 
+    def test_never_another_creators_video(self, client, mailer):
+        self.add_video("theirs00000", days_ago=1, backfill=True, channel="other")
+
+        assert "/s/" not in self.confirmed_page(client, mailer)
+
+    def test_never_a_video_that_is_gone(self, client, mailer):
+        # Deleted or made private after processing: its page answers 410.
+        self.add_video(
+            "gone0000000", days_ago=1, backfill=True, status=AppearanceStatus.UNAVAILABLE
+        )
+
+        assert "/s/" not in self.confirmed_page(client, mailer)
+
     @pytest.mark.parametrize(
-        "status", [MailingStatus.SCHEDULED, MailingStatus.STOPPED, MailingStatus.CANCELLED]
+        "status",
+        # Every open or abandoned state: only "sent" means the list has it.
+        sorted(set(MailingStatus) - {MailingStatus.SENT}),
     )
     def test_never_one_the_list_has_not_received(self, client, mailer, status):
         self.add_video("backfilled0", days_ago=30, backfill=True)
@@ -392,6 +483,7 @@ class TestUnsubscribe:
         for slug in ("pilot", "other"):
             sign_up(client, slug=slug)
             client.get(confirm_path(mailer))
+            update_subscription(slug=slug, confirm_sent_at=None)
 
         response = client.post(f"/abmelden/{subscription().unsubscribe_token}")
 
@@ -428,15 +520,7 @@ class TestUnsubscribe:
 
 def webhook(client, event: dict | bytes, *, secret=SECRET):
     body = event if isinstance(event, bytes) else json.dumps(event).encode()
-    message_id, timestamp = "msg_1", str(int(time.time()))
-    key = base64.b64decode(secret.removeprefix("whsec_"))
-    digest = hmac.new(key, f"{message_id}.{timestamp}.".encode() + body, hashlib.sha256).digest()
-    headers = {
-        "svix-id": message_id,
-        "svix-timestamp": timestamp,
-        "svix-signature": "v1," + base64.b64encode(digest).decode(),
-        "content-type": "application/json",
-    }
+    headers = svix_headers(body, secret) | {"content-type": "application/json"}
     return client.post("/webhooks/resend", content=body, headers=headers)
 
 
@@ -476,13 +560,41 @@ class TestWebhook:
 
         assert subscriber().blocked_at is None
 
-    def test_a_complaint_blocks_for_good(self, client):
+    def test_a_complaint_upgrades_a_bounce_block(self, client):
         webhook(client, bounced())
+        first = subscriber().blocked_at
+
         webhook(client, complained())
 
-        # A complaint outranks a bounce: a bounce block is lifted by the next
-        # confirmation, and a person who reported spam must never get one.
         assert subscriber().blocked_reason == BlockedReason.COMPLAINT
+        assert subscriber().blocked_at == first
+
+    def test_a_bounce_never_downgrades_a_complaint(self, client):
+        # A complaint is the stronger statement: the person asked us to stop.
+        webhook(client, complained())
+
+        webhook(client, bounced())
+
+        assert subscriber().blocked_reason == BlockedReason.COMPLAINT
+
+    def test_a_suppressed_send_blocks_like_a_bounce(self, client):
+        # The provider skipped the send: the address is on its own list, from a
+        # bounce this database may since have forgotten.
+        event = {"type": "email.suppressed", "data": {"to": [FAN], "suppressed": {}}}
+
+        webhook(client, event)
+
+        assert subscriber().blocked_reason == BlockedReason.BOUNCE
+
+    def test_a_replay_logs_no_second_block(self, client, caplog):
+        # The log is the operator's record of who got blocked, and when.
+        webhook(client, bounced())
+        caplog.clear()
+
+        webhook(client, bounced())
+
+        assert not [r for r in caplog.records if "subscriber.blocked" in str(r.msg)]
+        assert [r for r in caplog.records if "webhook.resend" in str(r.msg)]
 
     def test_a_forged_signature_is_refused_and_changes_nothing(self, client):
         # 401, not 200: with a wrong secret configured, the provider's dashboard
@@ -510,6 +622,49 @@ class TestWebhook:
 
         assert subscriber().blocked_reason == BlockedReason.BOUNCE
 
+    @pytest.mark.parametrize(
+        "event",
+        [
+            {"type": "email.complained"},
+            {"type": "email.complained", "data": ["not", "an", "object"]},
+            {"type": "email.complained", "data": {"to": [None, 42, {"a": 1}]}},
+            {"type": "email.complained", "data": {"to": "fan@example.org"}},
+            {"type": "email.bounced", "data": {"to": [FAN], "bounce": "Permanent"}},
+            ["not", "an", "object"],
+        ],
+    )
+    def test_a_signed_event_of_an_unexpected_shape_is_acknowledged(self, client, event):
+        # Signed means it came from the provider; retrying will not reshape it.
+        assert webhook(client, event).status_code == 200
+        assert subscriber().blocked_at is None
+
     def test_a_signed_body_that_is_not_json_is_ignored(self, client):
         # Retrying would not make it readable; acknowledge and move on.
         assert webhook(client, b"nonsense").status_code == 200
+
+
+class TestConcurrentSignUps:
+    def test_a_known_address_signing_up_twice_at_once_gets_one_mail(self, client, mailer):
+        # A known address, two creators, two requests at the same moment. Only
+        # the lock on the address row makes the second one wait and then see
+        # the first one's confirm mail; without it both read "nothing sent yet",
+        # and the per-address brake is undone by a double submit.
+        with session_scope() as setup:
+            setup.add(Subscriber(email=FAN))
+
+        answer = {}
+        with session_scope() as first:
+            creator = first.scalar(select(Creator).where(Creator.slug == "pilot"))
+            subscriptions.record_sign_up(first, creator, FAN, datetime.now(UTC), get_settings())
+
+            second = threading.Thread(
+                target=lambda: answer.update(response=sign_up(client, slug="other"))
+            )
+            second.start()
+            second.join(timeout=1)
+            assert second.is_alive(), "the second sign-up should wait for the first"
+
+        second.join(timeout=10)
+        assert ANSWER in answer["response"].text
+        assert mailer.sent == []
+        assert subscription(slug="other") is None

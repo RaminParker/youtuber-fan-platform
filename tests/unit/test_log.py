@@ -123,3 +123,24 @@ class TestExceptions:
 
         record = json.loads(capsys.readouterr().err)
         assert record["exception"][0]["exc_type"] == "ValueError"
+
+
+class TestErrorTracking:
+    """An error report must not carry what the error happened near."""
+
+    @pytest.fixture
+    def with_sentry(self, monkeypatch):
+        import sentry_sdk
+
+        # A syntactically valid DSN at a reserved domain; nothing is ever sent.
+        monkeypatch.setenv("SENTRY_DSN", "https://public@sentry.example.invalid/1")
+        configure(monkeypatch, as_json=True)
+        yield sentry_sdk.get_client().options
+        sentry_sdk.init()  # back to a disabled client; the SDK is process-global
+
+    def test_no_local_variables_and_no_request_bodies(self, with_sentry):
+        # Frame locals held the provider key, the settings and a fan's address;
+        # request bodies hold sign-up forms. Neither belongs in a third party.
+        assert with_sentry["include_local_variables"] is False
+        assert with_sentry["max_request_body_size"] == "never"
+        assert with_sentry["send_default_pii"] is False

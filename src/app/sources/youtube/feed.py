@@ -105,7 +105,8 @@ def fetch_feed(channel_id: str, client: httpx.Client | None = None) -> list[Feed
     Raises
     ------
     YouTubeTemporaryError
-        The feed was unreachable or answered with an error.
+        The feed was unreachable, answered with an error, or answered with
+        something that is not a feed (a consent or error page).
     """
     owned = client is None
     client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
@@ -117,6 +118,8 @@ def fetch_feed(channel_id: str, client: httpx.Client | None = None) -> list[Feed
         # Like every other transport here: the caller should not have to know
         # that httpx exists, nor tell a 500 apart from a DNS failure by type.
         raise YouTubeTemporaryError(f"feed for {channel_id}: {error}") from error
+    except ElementTree.ParseError as error:
+        raise YouTubeTemporaryError(f"feed for {channel_id} is not XML: {error}") from error
     finally:
         if owned:
             client.close()

@@ -1,8 +1,6 @@
 """The mail transport: batches, back-off, and the webhook signature."""
 
 import base64
-import hashlib
-import hmac
 import json
 
 import httpx
@@ -20,8 +18,9 @@ from app.delivery.email_client import (
 )
 from app.delivery.render import OutgoingEmail
 from app.errors import TemporaryError
+from tests.fakes import WEBHOOK_SECRET, svix_headers
 
-SECRET = "whsec_" + base64.b64encode(b"a-shared-secret-for-webhooks").decode()
+SECRET = WEBHOOK_SECRET
 NOW = 1_789_000_000.0
 
 
@@ -159,14 +158,7 @@ class TestWebhookSignature:
 
     @staticmethod
     def sign(body: bytes, message_id="msg_1", timestamp=str(int(NOW)), secret=SECRET):
-        key = base64.b64decode(secret.removeprefix("whsec_"))
-        signed = f"{message_id}.{timestamp}.".encode() + body
-        digest = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
-        return {
-            "svix-id": message_id,
-            "svix-timestamp": timestamp,
-            "svix-signature": f"v1,{digest}",
-        }
+        return svix_headers(body, secret, message_id=message_id, timestamp=timestamp)
 
     def test_a_genuine_signature_is_accepted(self):
         body = b'{"type":"email.bounced"}'
@@ -238,6 +230,23 @@ class TestWebhookSignature:
         body = b"{}"
 
         assert verify_webhook_signature(body, self.sign(body), secret, now=NOW) is False
+
+    @pytest.mark.parametrize("secret", ["", "whsec_"])
+    def test_an_empty_secret_rejects_a_request_signed_with_the_empty_key(self, secret):
+        # An empty secret decodes to an empty HMAC key without complaint, and
+        # anyone can sign with that. Unconfigured must mean "refuse everything".
+        body = b'{"type":"email.complained","data":{"to":["victim@example.org"]}}'
+
+        headers = self.sign(body, secret=secret)
+
+        assert verify_webhook_signature(body, headers, secret, now=NOW) is False
+
+    def test_a_non_ascii_signature_is_rejected_not_raised(self):
+        body = b"{}"
+        headers = self.sign(body)
+        headers["svix-signature"] = "v1,\xe4"
+
+        assert verify_webhook_signature(body, headers, SECRET, now=NOW) is False
 
     def test_header_case_does_not_matter(self):
         body = b"{}"

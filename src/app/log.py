@@ -47,11 +47,38 @@ MAILING_TRANSITION_LOST = "mailing.transition_lost"
 SUBSCRIPTION_CREATED = "subscription.created"
 SUBSCRIPTION_CONFIRMED = "subscription.confirmed"
 SUBSCRIPTION_UNSUBSCRIBED = "subscription.unsubscribed"
+SUBSCRIPTION_ADDRESS_REJECTED = "subscription.address_rejected"
+SUBSCRIPTION_CONFIRM_SENT = "subscription.confirm_sent"
+SUBSCRIPTION_CONFIRM_FAILED = "subscription.confirm_failed"
 SUBSCRIBER_BLOCKED = "subscriber.blocked"
 
+CREATOR_MAGIC_LINK_SENT = "creator.magic_link_sent"
+CREATOR_MAGIC_LINK_FAILED = "creator.magic_link_failed"
+CREATOR_SIGNED_IN = "creator.signed_in"
+CREATOR_NOTICE_FAILED = "notice.failed"
+
+OAUTH_CONNECTED = "oauth.connected"
+OAUTH_REVOKED = "oauth.revoked"
+
+EMAIL_REFUSED = "email.refused"
+EMAIL_QUOTA_EXHAUSTED = "email.quota_exhausted"
+
 WEBHOOK_RESEND = "webhook.resend"
+WEBHOOK_SECRET_UNUSABLE = "webhook.secret_unusable"
+
+WEB_HOSTILE_PATH = "web.hostile_path"
+WEB_RATE_LIMITED = "web.rate_limited"
+
 FEED_POLLED = "feed.polled"
+CLEANUP_DONE = "cleanup.done"
+
+WORKER_STARTED = "worker.started"
+WORKER_STOPPING = "worker.stopping"
+WORKER_STOPPED = "worker.stopped"
 WORKER_TICK = "worker.tick"
+WORKER_TICK_FAILED = "worker.tick_failed"
+WORKER_STEP_CRASHED = "worker.step_crashed"
+WORKER_PERIODIC_FAILED = "worker.periodic_failed"
 STEP_RETRY = "step.retry"
 QUOTA_YOUTUBE = "quota.youtube"
 
@@ -151,8 +178,10 @@ def configure_logging(settings: Settings) -> None:
 def _configure_error_tracking(settings: Settings) -> None:
     """Send exhausted retries and unexpected errors to Sentry, if a DSN is set.
 
-    ``send_default_pii=False``: a fan's address must not leave the system
-    because a step crashed near one.
+    Nothing personal or secret may leave with a report: no PII by default, no
+    request bodies (sign-up forms carry addresses), and no frame locals — the
+    SDK's scrubber only checks top-level names, so locals would ship the mail
+    provider's key, the settings and a fan's address verbatim.
     """
     if not settings.secrets.sentry_dsn:
         return
@@ -161,6 +190,8 @@ def _configure_error_tracking(settings: Settings) -> None:
     sentry_sdk.init(
         dsn=settings.secrets.sentry_dsn,
         send_default_pii=False,
+        include_local_variables=False,
+        max_request_body_size="never",
         environment="production" if settings.logging.json_format else "development",
     )
 

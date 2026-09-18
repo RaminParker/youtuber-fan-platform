@@ -39,6 +39,9 @@ def clean_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.setitem(model.model_config, "env_file", None)
     for name, value in REQUIRED_SECRETS.items():
         monkeypatch.setenv(name, value)
+    # Tests use example.org, whose null MX refuses all mail; and a test that
+    # depends on the network is not a test. The DNS path has its own unit tests.
+    monkeypatch.setenv("WEB__CHECK_ADDRESS_DNS", "false")
     get_settings.cache_clear()
     # The rate limiter counts per address in process memory, and every test
     # arrives from the same one. Without this, test number four is throttled.

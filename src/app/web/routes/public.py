@@ -5,10 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.web.deps import get_session
+from app.web.deps import DbSession
 from app.web.pages import page
 
 router = APIRouter(tags=["public"])
@@ -33,7 +32,7 @@ def handle_privacy() -> HTMLResponse:
 
 
 @router.get("/health", include_in_schema=False)
-def handle_health(session: Session = Depends(get_session)) -> dict[str, str]:
+def handle_health(session: DbSession) -> dict[str, str]:
     """Report readiness, database included."""
     session.execute(text("SELECT 1"))
     return {"status": "ok"}

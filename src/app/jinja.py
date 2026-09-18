@@ -66,6 +66,15 @@ def get_jinja() -> Environment:
     return build_environment(get_settings())
 
 
+def render_partial(template: str, **context) -> str:
+    """Render a fragment by name, without the `partials/` prefix.
+
+    What HTMX swaps into a page: the same template the page includes, so the
+    fragment and the page cannot drift apart.
+    """
+    return get_jinja().get_template(f"partials/{template}.html").render(**context)
+
+
 def render_page(template: str, **context) -> str:
     """Render a page template by name, without the `pages/` prefix.
 

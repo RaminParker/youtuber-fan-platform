@@ -1,11 +1,12 @@
 {% extends "pages/base.html" %}
 {% block title %}Zusammenfassungen von {{ creator.name }}{% endblock %}
-{% block head %}<script src="/static/htmx.min.js" defer></script>{% endblock %}
+{% block head %}
+  {# htmx 2 swaps no 4xx by default; a throttled click must still say something. #}
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"429","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+  <script src="/static/htmx.min.js" defer></script>
+{% endblock %}
 {% block content %}
-  <header class="creator">
-    {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="56" height="56">{% endif %}
-    <div><strong>{{ creator.name }}</strong></div>
-  </header>
+  {% include "partials/creator_header.html" %}
 
   <h1>Die Zusammenfassung per Mail</h1>
   <p>Ein paar Tage nach jedem neuen Video bekommst du eine kurze Zusammenfassung
@@ -15,9 +16,5 @@
 
   {% include "partials/signup_form.html" %}
 
-  <footer class="platform">
-    Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
-    <a href="{{ base_url }}/impressum">Impressum</a> ·
-    <a href="{{ base_url }}/datenschutz">Datenschutz</a>
-  </footer>
+  {% include "partials/page_footer.html" %}
 {% endblock %}

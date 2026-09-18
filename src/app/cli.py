@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import log
+from app.addresses import InvalidAddress, validate
 from app.analysis.llm import LLMError, cost_cents
 from app.analysis.stored import load_analysis
 from app.analysis.summarize import summarise
@@ -69,6 +70,10 @@ def source_of(session: Session, creator: Creator) -> Source:
 def handle_onboard(args: argparse.Namespace) -> None:
     """Create a creator and their source, and print the sign-up link."""
     settings = get_settings()
+    try:
+        contact_email = validate(args.email, check_dns=settings.web.check_address_dns)
+    except InvalidAddress as error:
+        sys.exit(f"{args.email!r} cannot receive mail: {error}")
     profile = get_services().youtube.source_profile(args.channel_id)
     if profile is None:
         sys.exit(f"No channel with id {args.channel_id!r}.")
@@ -77,7 +82,7 @@ def handle_onboard(args: argparse.Namespace) -> None:
         creator = Creator(
             slug=args.slug,
             name=args.name,
-            contact_email=args.email.lower(),
+            contact_email=contact_email,
             # The channel's own avatar is a better default than no logo at all,
             # and the creator can replace it on the settings page.
             logo_url=profile.avatar_url,

@@ -49,3 +49,66 @@ class TestStatic:
 
         assert response.status_code == 200
         assert "text/css" in response.headers["content-type"]
+
+
+class TestCommitBeforeAnswer:
+    """A page that says "done" must only say it once the change is stored."""
+
+    @staticmethod
+    def failing_session():
+        from sqlalchemy.exc import OperationalError
+
+        from app.db.engine import get_session_factory
+
+        session = get_session_factory()()
+        try:
+            yield session
+            raise OperationalError("COMMIT", {}, Exception("connection lost"))
+        finally:
+            session.close()
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [("post", "/abmelden/some-token"), ("get", "/k/pilot/bestaetigen/some-token")],
+    )
+    def test_a_failed_commit_never_reaches_the_client_as_success(
+        self, migrated_engine, monkeypatch, test_database_url, method, path
+    ):
+        # One-click unsubscribe is not retried by the mail client: a 200 sent
+        # before a failed commit would keep mailing someone who left.
+        from app.web.deps import get_session
+
+        monkeypatch.setenv("DATABASE_URL", test_database_url)
+        get_settings.cache_clear()
+        app = create_app()
+        app.dependency_overrides[get_session] = self.failing_session
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert getattr(client, method)(path).status_code == 500
+
+
+class TestHostileInput:
+    """Crafted requests get a plain refusal, never a 500 and an error report."""
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("get", "/abmelden/abc%00"),
+            ("post", "/abmelden/abc%00"),
+            ("get", "/k/pilot/bestaetigen/abc%00"),
+            ("get", "/s/abc%00"),
+            ("get", "/creator/login/abc%1f"),
+        ],
+    )
+    def test_control_characters_in_the_path_are_a_404(self, client, method, path):
+        # PostgreSQL rejects a NUL byte in a string parameter; without this the
+        # database driver raises and every such request is a 500.
+        assert getattr(client, method)(path).status_code == 404
+
+    @pytest.mark.parametrize("path", ["/webhooks/resend", "/k/pilot", "/creator/login"])
+    def test_an_oversized_body_is_refused_before_it_is_read(self, client, path):
+        # Nothing here needs more than a few kilobytes; a few concurrent
+        # 100 MB bodies would otherwise take the single web instance down.
+        response = client.post(path, content=b"x" * 100_000)
+
+        assert response.status_code == 413

@@ -101,3 +101,14 @@ class TestFetching:
 
         assert len(calls) == 2
         assert not client.is_closed
+
+
+class TestFetchFeed:
+    def test_a_page_that_is_not_a_feed_is_temporary(self):
+        # A consent or error page answered with 200: the endpoint misbehaving,
+        # which is exactly what "try again later" is for — not a crash that
+        # costs every other channel its poll.
+        html = httpx.MockTransport(lambda request: httpx.Response(200, text="<html><body>"))
+
+        with httpx.Client(transport=html) as client, pytest.raises(YouTubeTemporaryError):
+            fetch_feed("UCpilot", client)

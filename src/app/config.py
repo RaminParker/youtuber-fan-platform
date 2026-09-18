@@ -128,6 +128,7 @@ class WebSettings(BaseModel):
     rate_limit_magic_link: str
     rate_limit_contact: str
     confirm_resend_minutes: int
+    check_address_dns: bool
 
 
 class WorkerSettings(BaseModel):

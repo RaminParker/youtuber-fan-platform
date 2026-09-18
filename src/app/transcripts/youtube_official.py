@@ -102,7 +102,7 @@ class OfficialCaptions:
             token = self._oauth.refresh_access_token(refresh_token)
         except GrantRevoked as error:
             source.oauth_needs_reconsent = True
-            logger.warning("oauth.revoked", source_id=source.id, error=str(error))
+            logger.warning(log.OAUTH_REVOKED, source_id=source.id, error=str(error))
             raise TranscriptUnavailable("no_grant") from error
 
         if token.new_refresh_token:

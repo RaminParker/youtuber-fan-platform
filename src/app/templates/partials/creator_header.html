@@ -1,0 +1,6 @@
+{# The creator's name and logo at the top of every fan page: the fan's
+   relationship is with the creator, not with us. #}
+<header class="creator">
+  {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="56" height="56">{% endif %}
+  <div><strong>{{ creator.name }}</strong></div>
+</header>

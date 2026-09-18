@@ -61,15 +61,17 @@ def inline(html: str) -> str:
     return css_inline.inline(html, inline_style_tags=True, load_remote_stylesheets=False)
 
 
-def render_pair(template: str, creator: Creator, **context) -> tuple[str, str]:
+def render_pair(template: str, creator: Creator, subject: str, **context) -> tuple[str, str]:
     """Render an HTML template and its plain-text twin.
 
     The text part is a template of its own rather than stripped-down HTML:
     heuristic stripping produces exactly the kind of mail that looks broken in
-    the one client the recipient happens to use.
+    the one client the recipient happens to use. ``subject`` is passed in, not
+    written in the template, so the mail's subject line and its HTML title are
+    one value.
     """
     jinja = get_jinja()
-    full = {"creator": creator, "accent": creator.accent_color, **context}
+    full = {"creator": creator, "accent": creator.accent_color, "subject": subject, **context}
     html = inline(jinja.get_template(f"email/{template}.html").render(**full))
     text = jinja.get_template(f"email/{template}.txt").render(**full)
     return html, text
@@ -93,6 +95,7 @@ def render_notice_mail(
     html, text = render_pair(
         "creator_notice",
         creator,
+        notice.subject,
         headline=notice.headline,
         explanation=notice.explanation,
         what_now=notice.what_now,
@@ -119,11 +122,12 @@ def render_magic_link_mail(creator: Creator, link: str, settings: Settings) -> O
     the first one expired is normal, and suppressing it would lock the creator
     out of their own settings.
     """
-    html, text = render_pair("magic_link", creator, link=link, settings=settings)
+    subject = f"Dein Anmeldelink für {settings.product.name}"
+    html, text = render_pair("magic_link", creator, subject, link=link, settings=settings)
     return OutgoingEmail(
         from_=f"{settings.product.name} <{settings.sender_address}>",
         to=creator.contact_email,
-        subject=f"Dein Anmeldelink für {settings.product.name}",
+        subject=subject,
         html=html,
         text=text,
         reply_to=settings.support_email,
@@ -140,11 +144,12 @@ def render_confirm_mail(
     has not proved it wants them. Without an idempotency key, because asking
     again after a lost mail is exactly what the fan is supposed to do.
     """
-    html, text = render_pair("confirm", creator, link=link)
+    subject = f"Bitte bestätige: Zusammenfassungen von {creator.name}"
+    html, text = render_pair("confirm", creator, subject, link=link)
     return OutgoingEmail(
         from_=sender(creator, settings),
         to=address,
-        subject=f"Bitte bestätige: Zusammenfassungen von {creator.name}",
+        subject=subject,
         html=html,
         text=text,
         reply_to=reply_to(creator, settings),
@@ -297,7 +302,8 @@ def render_summary_mail(
         "send_at": send_at,
         "postpone_hours": settings.schedule.postpone_hours,
     }
-    html, text = render_pair("summary", rendered_as, **context)
+    subject = f"{rendered_as.name}: {appearance.title}"
+    html, text = render_pair("summary", rendered_as, subject, **context)
 
     headers = {}
     if subscription is not None:
@@ -311,7 +317,7 @@ def render_summary_mail(
     return OutgoingEmail(
         from_=sender(rendered_as, settings),
         to=creator.contact_email if preview else subscription.subscriber.email,
-        subject=f"{rendered_as.name}: {appearance.title}",
+        subject=subject,
         html=html,
         text=text,
         reply_to=reply_to(rendered_as, settings),

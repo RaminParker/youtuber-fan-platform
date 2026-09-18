@@ -6,27 +6,61 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import log
 from app.config import Settings, get_settings
-from app.jinja import TEMPLATE_DIR
+from app.jinja import TEMPLATE_DIR, render_partial
 from app.web.limits import limiter
+from app.web.pages import page
 from app.web.routes import creator, fan, public, webhooks
 
 STATIC_DIR = TEMPLATE_DIR.parent / "static"
 REQUEST_ID_HEADER = "X-Request-ID"
 
+#: Every request this app accepts — a form, a webhook — is a few kilobytes.
+#: Without a cap, a handful of large bodies exhaust the web instance's memory.
+MAX_BODY_BYTES = 64 * 1024
+
+#: No URL this app hands out contains a control character. PostgreSQL rejects
+#: a NUL in a string parameter, so without this check a crafted link is a 500.
+CONTROL_CHARACTERS = frozenset(map(chr, [*range(32), 127]))
+
 logger = log.get_logger(__name__)
 
 
+RATE_LIMITED = "Gerade kommen sehr viele Anfragen aus deinem Netz. Bitte versuch es in einer Minute noch einmal."
+
+
 def handle_rate_limited(request: Request, exc: Exception) -> Response:
-    """Answer a throttled request plainly, without leaking what was throttled."""
-    logger.warning("web.rate_limited", path=request.url.path)
-    return JSONResponse({"detail": "Zu viele Anfragen. Bitte kurz warten."}, status_code=429)
+    """Answer a throttled request in words, without leaking what was throttled.
+
+    A page for a form post, the form's fragment for HTMX — the sign-up page
+    tells htmx to swap a 429 in, so a throttled click is not simply ignored.
+    """
+    logger.warning(log.WEB_RATE_LIMITED, path=request.url.path)
+    if request.headers.get("HX-Request") == "true":
+        return HTMLResponse(render_partial("rate_limited", message=RATE_LIMITED), status_code=429)
+    return page("error", status_code=429, heading="Kurz durchatmen", message=RATE_LIMITED)
+
+
+async def handle_control_characters(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Answer a path with control characters as the unknown link it is."""
+    if CONTROL_CHARACTERS.isdisjoint(request.url.path):
+        return await call_next(request)
+    logger.warning(log.WEB_HOSTILE_PATH)
+    return page(
+        "error",
+        status_code=404,
+        heading="Diese Seite gibt es nicht",
+        message="Der Link stimmt nicht.",
+    )
 
 
 async def handle_request_id(
@@ -60,6 +94,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     log.configure_logging(settings)
 
     app = FastAPI(title=settings.product.name, docs_url=None, redoc_url=None, openapi_url=None)
+    # Added first, so it sits innermost, right above the routes: the function
+    # middlewares below read the body in a task of their own, and a refusal
+    # raised there would arrive wrapped in an ExceptionGroup, as a 500.
+    app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_BODY_BYTES)
+    app.middleware("http")(handle_control_characters)
     app.middleware("http")(handle_request_id)
     app.add_middleware(
         SessionMiddleware,

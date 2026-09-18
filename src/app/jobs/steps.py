@@ -32,6 +32,7 @@ from app.db.models import (
     AnalysisKind,
     Appearance,
     AppearanceStatus,
+    BlockedReason,
     Creator,
     JobRun,
     NoticeKind,
@@ -241,10 +242,8 @@ def poll_feeds(session: Session, now: datetime) -> int:
             try:
                 entries = youtube_feed.fetch_feed(source.external_id, client)
             except TemporaryError as error:
-                # One unreachable channel must cost neither the other channels
-                # nor the interval: if this aborted, `_record_run` below would
-                # never happen, and the six-hourly poll would turn into a
-                # once-a-minute hammering of an endpoint already refusing it.
+                # One unreachable channel must not cost the other channels
+                # their poll.
                 logger.warning(log.FEED_POLLED, source_id=source.id, error=str(error))
                 continue
 
@@ -263,7 +262,6 @@ def poll_feeds(session: Session, now: datetime) -> int:
             new_items += found
             logger.info(log.FEED_POLLED, source_id=source.id, entries=len(entries), new=found)
 
-    _record_run(session, POLL_FEEDS, now)
     return new_items
 
 
@@ -271,8 +269,14 @@ def cleanup(session: Session, now: datetime, settings: Settings) -> None:
     """Delete what we have no reason to keep (manifest §7.9, plan §13).
 
     Sign-ups never confirmed, and unsubscriptions past their retention. Then
-    every address left without a subscription — unless it is blocked, because
-    blocked addresses are the suppression list.
+    every address left without a subscription — except a complaint: a person
+    who reported spam must never be written to again, and the row is what
+    stops a new sign-up. A bounced address has nothing left to protect; the
+    mail provider keeps its own suppression entry for it.
+
+    An address a sign-up is holding right now is skipped (``SKIP LOCKED``):
+    deleting it would cascade into the subscription being added. Tomorrow's
+    run gets it, if it is still an orphan then.
 
     The re-check of deleted videos joins this job with the send path (M6).
     """
@@ -289,14 +293,16 @@ def cleanup(session: Session, now: datetime, settings: Settings) -> None:
             )
         )
     ).rowcount
-    orphans = session.execute(
-        delete(Subscriber).where(
-            Subscriber.blocked_at.is_(None),
+    orphans = (
+        select(Subscriber.id)
+        .where(
+            Subscriber.blocked_reason.is_distinct_from(BlockedReason.COMPLAINT),
             ~select(Subscription.id).where(Subscription.subscriber_id == Subscriber.id).exists(),
         )
-    ).rowcount
-    logger.info("cleanup.done", subscriptions=expired, subscribers=orphans)
-    _record_run(session, CLEANUP, now)
+        .with_for_update(skip_locked=True)
+    )
+    deleted = session.execute(delete(Subscriber).where(Subscriber.id.in_(orphans))).rowcount
+    logger.info(log.CLEANUP_DONE, subscriptions=expired, subscribers=deleted)
 
 
 def job_is_due(session: Session, name: str, now: datetime, every: timedelta) -> bool:
@@ -305,7 +311,7 @@ def job_is_due(session: Session, name: str, now: datetime, every: timedelta) -> 
     return run is None or run.last_run_at + every <= now
 
 
-def _record_run(session: Session, name: str, now: datetime) -> None:
+def record_run(session: Session, name: str, now: datetime) -> None:
     """Remember that a periodic job ran. This replaces a queue's cron table."""
     session.execute(
         insert(JobRun)
@@ -326,7 +332,7 @@ def notify_creator(creator: Creator, kind: NoticeKind, **context) -> None:
     try:
         get_services().email.send(mail)
     except Exception:
-        logger.exception("notice.failed", creator_id=creator.id, kind=kind)
+        logger.exception(log.CREATOR_NOTICE_FAILED, creator_id=creator.id, kind=kind)
 
 
 def transcribe(session: Session, appearance_id: int, now: datetime) -> None:

@@ -63,8 +63,11 @@ rate_limit_signup = "20/minute"         # per IP; deliberately loose, many fans
                                         # share one mobile-carrier NAT address
 rate_limit_magic_link = "3/minute"
 rate_limit_contact = "3/minute"
-confirm_resend_minutes = 10             # per e-mail address: at most one confirm
-                                        # mail per address in this window
+confirm_resend_minutes = 10             # per e-mail address, across all creators:
+                                        # at most one confirm mail in this window
+check_address_dns = true                # sign-up asks DNS whether the domain accepts
+                                        # mail; a mistyped domain would bounce and cost
+                                        # the reputation every creator shares
 
 [worker]
 loop_seconds = 60                       # how often the worker looks for due steps

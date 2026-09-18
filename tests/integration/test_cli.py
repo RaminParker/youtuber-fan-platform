@@ -29,7 +29,7 @@ def connector(committed_database, fake_services):
     return connector
 
 
-def onboard():
+def onboard(email="Pilot@Example.org"):
     cli.main(
         [
             "onboard",
@@ -38,7 +38,7 @@ def onboard():
             "--name",
             "Pilotkanal",
             "--email",
-            "Pilot@Example.org",
+            email,
             "--channel-id",
             CHANNEL,
         ]
@@ -82,6 +82,17 @@ class TestOnboard:
 
         with pytest.raises(SystemExit):
             onboard()
+
+        with session_scope() as session:
+            assert session.scalar(select(Creator)) is None
+
+    def test_an_address_that_cannot_receive_mail_stops_before_writing_anything(
+        self, connector, capsys
+    ):
+        # Magic links and notices go to this address; a typo would lock the
+        # creator out of their own settings from day one.
+        with pytest.raises(SystemExit, match="cannot receive mail"):
+            onboard(email="pilot@example")
 
         with session_scope() as session:
             assert session.scalar(select(Creator)) is None

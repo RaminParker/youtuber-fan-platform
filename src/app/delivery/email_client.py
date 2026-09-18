@@ -103,7 +103,7 @@ class ResendClient:
             raise _rate_limit_error(response)
         if response.status_code >= 500:
             raise EmailTemporaryError(f"HTTP {response.status_code}")
-        logger.error("email.refused", status=response.status_code, body=response.text[:500])
+        logger.error(log.EMAIL_REFUSED, status=response.status_code, body=response.text[:500])
         raise EmailError(f"HTTP {response.status_code}: {response.text[:200]}")
 
     def send_batch(self, mails: list[OutgoingEmail]) -> list[str]:
@@ -154,7 +154,7 @@ def _rate_limit_error(response: httpx.Response) -> EmailTemporaryError:
     except ValueError:
         name = ""
     if name in ("daily_quota_exceeded", "monthly_quota_exceeded"):
-        logger.error("email.quota_exhausted", name=name)
+        logger.error(log.EMAIL_QUOTA_EXHAUSTED, name=name)
         return QuotaExhausted(name)
     return EmailTemporaryError(f"rate limited: {name or 'unknown'}")
 
@@ -196,17 +196,21 @@ def verify_webhook_signature(
     try:
         key = base64.b64decode(secret.removeprefix("whsec_"), validate=True)
     except (binascii.Error, ValueError):
+        key = b""
+    if not key:
         # A missing or malformed secret must reject, like every other failure
-        # here — not raise past the caller into a 500.
-        logger.error("webhook.secret_unusable")
+        # here. An empty one decodes to an empty HMAC key without complaint —
+        # and anyone can sign with that.
+        logger.error(log.WEBHOOK_SECRET_UNUSABLE)
         return False
     signed = f"{message_id}.{timestamp}.".encode() + body
-    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest())
 
     # The header may carry several space-separated versioned signatures; any one
-    # of the v1 entries matching is enough.
+    # of the v1 entries matching is enough. Compared as bytes: a header is
+    # attacker-controlled, and comparing non-ASCII strings raises.
     return any(
-        hmac.compare_digest(expected, candidate.split(",", 1)[1])
+        hmac.compare_digest(expected, candidate.split(",", 1)[1].encode())
         for candidate in signatures.split()
         if candidate.startswith("v1,")
     )

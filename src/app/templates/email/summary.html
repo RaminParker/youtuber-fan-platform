@@ -1,5 +1,4 @@
 {% extends "email/base.html" %}
-{% block subject %}{{ creator.name }}: {{ appearance.title }}{% endblock %}
 {% block header_line %}Zusammenfassung für Abonnenten von {{ creator.name }}{% endblock %}
 {% block content %}
   {% if preview %}

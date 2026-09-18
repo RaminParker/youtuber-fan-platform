@@ -131,6 +131,26 @@ class TestBrakes:
 
 
 class TestTheFormRevealsNothing:
+    def test_a_failed_send_does_not_lock_the_creator_out(self, client, mailer):
+        # "One link at a time" must not count a link that never left: otherwise
+        # a provider hiccup locks the creator out for the link's whole lifetime.
+        mailer.fail_with = RuntimeError("provider down")
+        request_link(client)
+        mailer.fail_with = None
+
+        request_link(client)
+
+        assert len(mailer.sent) == 1
+
+    @pytest.mark.parametrize("address", ["pilot\x00@example.org", "<pilot@example.org>", ""])
+    def test_a_malformed_address_gets_the_same_answer(self, client, mailer, address):
+        # A NUL byte used to reach the database and come back as a 500.
+        response = request_link(client, address)
+
+        assert response.status_code == 200
+        assert response.text == request_link(client, "stranger@example.org").text
+        assert mailer.sent == []
+
     def test_a_broken_mail_provider_does_not_become_an_existence_oracle(
         self, client, mailer, fake_services
     ):

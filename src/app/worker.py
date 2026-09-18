@@ -58,7 +58,7 @@ def handle_stop_signal(signum: int, frame: FrameType | None) -> None:
     global _stopping
     _stopping = True
     _wake.set()
-    logger.info("worker.stopping", signal=signal.Signals(signum).name)
+    logger.info(log.WORKER_STOPPING, signal=signal.Signals(signum).name)
 
 
 def due_appearances(session: Session, now: datetime) -> list[tuple[int, str]]:
@@ -166,7 +166,7 @@ def run_due_steps(now: datetime) -> int:
             # The step handlers above already record what they can; this is the
             # backstop for a failure while recording. One row must never cost
             # the others their turn.
-            logger.exception("worker.step_crashed", appearance_id=appearance_id)
+            logger.exception(log.WORKER_STEP_CRASHED, appearance_id=appearance_id)
     return len(due)
 
 
@@ -177,7 +177,14 @@ CLEANUP_EVERY = timedelta(days=1)
 def run_periodic_jobs(now: datetime, settings: Settings) -> None:
     """Run the jobs that go by the clock rather than by a row's status.
 
-    Each in its own transaction, so a failing poll never costs the cleanup.
+    A due run is recorded — and committed — before the job starts. A job that
+    then fails, for any reason, waits for its interval like one that succeeded:
+    otherwise an unexpected error turns a six-hourly poll into a once-a-minute
+    one with a traceback each time. Each job has its own transaction, so one
+    failing never costs another its run.
+
+    ``# ponytail: a job killed mid-run waits a full interval; both are
+    idempotent sweeps, so the next run catches up.``
     """
     jobs = (
         (
@@ -190,10 +197,13 @@ def run_periodic_jobs(now: datetime, settings: Settings) -> None:
     for name, every, run in jobs:
         try:
             with session_scope() as session:
-                if steps.job_is_due(session, name, now, every):
-                    run(session)
+                if not steps.job_is_due(session, name, now, every):
+                    continue
+                steps.record_run(session, name, now)
+            with session_scope() as session:
+                run(session)
         except Exception:
-            logger.exception("worker.periodic_failed", job=name)
+            logger.exception(log.WORKER_PERIODIC_FAILED, job=name)
 
 
 def run_tick(now: datetime, settings: Settings | None = None) -> None:
@@ -225,7 +235,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, handle_stop_signal)
     signal.signal(signal.SIGINT, handle_stop_signal)
 
-    logger.info("worker.started", loop_seconds=settings.worker.loop_seconds)
+    logger.info(log.WORKER_STARTED, loop_seconds=settings.worker.loop_seconds)
     while not _stopping:
         started = time.monotonic()
         try:
@@ -233,7 +243,7 @@ def main() -> None:
         except Exception:
             # One bad tick must never end the process: the next one may succeed,
             # and whatever failed is still in the database, waiting.
-            logger.exception("worker.tick_failed")
+            logger.exception(log.WORKER_TICK_FAILED)
         finally:
             log.clear_context()
 
@@ -244,7 +254,7 @@ def main() -> None:
         # before that.
         _wake.wait(max(0.0, settings.worker.loop_seconds - elapsed))
 
-    logger.info("worker.stopped")
+    logger.info(log.WORKER_STOPPED)
 
 
 if __name__ == "__main__":

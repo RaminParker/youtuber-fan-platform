@@ -436,8 +436,10 @@ class Delivery(Base):
     mailing_id: Mapped[int] = mapped_column(
         ForeignKey("mailings.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Indexed for the cascade: deleting a subscription (cleanup, a fan's
+    # erasure request) must not scan every delivery ever sent.
     subscription_id: Mapped[int] = mapped_column(
-        ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     sent_at: Mapped[datetime | None] = timestamp()
 

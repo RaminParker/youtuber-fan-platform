@@ -3,13 +3,13 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.config import get_settings
+from app.db.engine import session_scope
 from app.db.models import (
     BlockedReason,
     Creator,
-    JobRun,
     Subscriber,
     Subscription,
     SubscriptionStatus,
@@ -96,7 +96,9 @@ class TestCleanup:
 
         assert addresses(session) == {"fan@x.org"}
 
-    def test_a_blocked_address_is_kept_as_the_suppression_list(self, session, creator):
+    def test_a_complaint_is_never_forgotten(self, session, creator):
+        # A person who reported spam must stay blocked even after their last
+        # subscription is gone: a new sign-up would otherwise write to them.
         add(
             session,
             creator,
@@ -111,6 +113,23 @@ class TestCleanup:
         assert addresses(session) == {"spam@x.org"}
         assert session.scalar(select(func.count()).select_from(Subscription)) == 0
 
+    def test_a_bounced_address_without_subscriptions_is_deleted(self, session, creator):
+        # A mistyped address that bounced has nothing to protect: the mail
+        # provider keeps its own suppression entry, and we keep no data we do
+        # not need (manifest §7.9).
+        add(
+            session,
+            creator,
+            "typo@gmial.com",
+            SubscriptionStatus.PENDING,
+            blocked=BlockedReason.BOUNCE,
+            confirm_expires_at=NOW - timedelta(days=1),
+        )
+
+        steps.cleanup(session, NOW, get_settings())
+
+        assert addresses(session) == set()
+
     def test_an_address_still_following_another_creator_stays(self, session, creator):
         other = Creator(slug="other", name="Other", contact_email="other@example.org")
         session.add(other)
@@ -123,7 +142,21 @@ class TestCleanup:
 
         assert addresses(session) == {"fan@x.org"}
 
-    def test_the_run_is_recorded(self, session, creator):
-        steps.cleanup(session, NOW, get_settings())
 
-        assert session.get(JobRun, steps.CLEANUP).last_run_at == NOW
+class TestCleanupAgainstASignUp:
+    """The daily sweep must never delete what a sign-up is working on."""
+
+    def test_an_address_a_sign_up_holds_is_skipped(self, committed_database):
+        with session_scope() as setup:
+            setup.add(Subscriber(email="fan@x.org"))
+
+        with session_scope() as sign_up:
+            # The sign-up has locked the address and is about to add a subscription.
+            sign_up.scalars(select(Subscriber).with_for_update()).one()
+
+            with session_scope() as sweep:
+                sweep.execute(text("SET LOCAL lock_timeout = '2s'"))
+                steps.cleanup(sweep, NOW, get_settings())
+
+        with session_scope() as check:
+            assert check.scalar(select(Subscriber.email)) == "fan@x.org"

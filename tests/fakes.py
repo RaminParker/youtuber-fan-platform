@@ -7,6 +7,10 @@ in this suite patches an internal — everything enters through ``set_services``
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import time
 from datetime import UTC, datetime
 
 from app.delivery.render import OutgoingEmail
@@ -253,3 +257,18 @@ def transcript(origin: str = "youtube_unofficial", language: str = "de", is_gene
             Segment(start=3.5, duration=5.0, text="Heute geht es um die Verwaltung."),
         ],
     )
+
+
+#: A webhook secret in the provider's format, for signing test requests.
+WEBHOOK_SECRET = "whsec_" + base64.b64encode(b"a-shared-secret-for-webhooks").decode()
+
+
+def svix_headers(
+    body: bytes, secret: str = WEBHOOK_SECRET, *, message_id: str = "msg_1", timestamp: str = ""
+) -> dict[str, str]:
+    """Sign a body the way the mail provider does: HMAC-SHA256 over ``id.timestamp.body``."""
+    timestamp = timestamp or str(int(time.time()))
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    signed = f"{message_id}.{timestamp}.".encode() + body
+    digest = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    return {"svix-id": message_id, "svix-timestamp": timestamp, "svix-signature": f"v1,{digest}"}

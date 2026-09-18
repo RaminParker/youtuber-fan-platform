@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -26,7 +27,13 @@ def get_session() -> Iterator[Session]:
         session.close()
 
 
-def signed_in_creator(request: Request, session: Session = Depends(get_session)) -> Creator | None:
+#: How every route receives its session. ``scope="function"`` closes it — and
+#: commits — before the response is sent, not after: a page that says "done"
+#: must never go out ahead of a commit that then fails.
+DbSession = Annotated[Session, Depends(get_session, scope="function")]
+
+
+def signed_in_creator(request: Request, session: DbSession) -> Creator | None:
     """Return the signed-in creator, or ``None``."""
     creator_id = request.session.get(SESSION_KEY)
     if creator_id is None:

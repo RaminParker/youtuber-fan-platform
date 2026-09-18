@@ -17,19 +17,21 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app import log
+from app.addresses import InvalidAddress, validate
 from app.config import Settings, get_settings
+from app.db.engine import session_scope
 from app.db.models import Creator, Source
 from app.delivery.render import render_magic_link_mail
 from app.services import get_services
 from app.sources.youtube.oauth import GrantRevoked, authorization_url, encrypt_token
 from app.tokens import new_token
-from app.web.deps import SESSION_KEY, current_creator, get_session
+from app.web.deps import SESSION_KEY, DbSession, current_creator
 from app.web.limits import limiter, magic_link_limit
 from app.web.pages import page
 
@@ -63,20 +65,24 @@ def handle_login_form() -> HTMLResponse:
 @limiter.limit(magic_link_limit)
 def handle_login_request(
     request: Request,
-    email: str = Form(...),
-    session: Session = Depends(get_session),
+    session: DbSession,
+    background: BackgroundTasks,
+    email: str = Form(""),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    """Send a sign-in link, if the address belongs to a creator."""
-    creator = session.scalar(select(Creator).where(Creator.contact_email == email.strip().lower()))
+    """Send a sign-in link, if the address belongs to a creator.
+
+    The same answer, just as fast, for every address: the link is committed
+    before the answer leaves and mailed after it, so neither a failing mail
+    provider nor the time a send takes tells a customer from a stranger.
+    """
+    try:
+        address = validate(email, check_dns=False)
+    except InvalidAddress:
+        return page("creator_login", sent=True, message=SIGN_IN_ANSWER)
+    creator = session.scalar(select(Creator).where(Creator.contact_email == address))
     if creator is not None and _needs_a_new_link(creator):
-        try:
-            _send_magic_link(creator, settings)
-        except Exception:
-            # A 500 here and a 200 for an unknown address is an existence
-            # oracle. The creator can simply ask again; the form must not
-            # answer differently depending on who asked.
-            logger.exception("creator.magic_link_failed", creator_id=creator.id)
+        background.add_task(_send_magic_link, creator.id, _issue_magic_link(creator, settings))
     return page("creator_login", sent=True, message=SIGN_IN_ANSWER)
 
 
@@ -93,16 +99,43 @@ def _needs_a_new_link(creator: Creator) -> bool:
     return expires_at is None or expires_at <= datetime.now(UTC)
 
 
-def _send_magic_link(creator: Creator, settings: Settings) -> None:
-    """Issue a fresh single-use token and mail it."""
+def _issue_magic_link(creator: Creator, settings: Settings) -> str:
+    """Store a fresh single-use token (hashed) and return the link carrying it."""
     token = new_token()
     creator.magic_link_token_hash = hash_token(token)
     creator.magic_link_expires_at = datetime.now(UTC) + timedelta(
         minutes=settings.email.magic_link_minutes
     )
-    link = f"{settings.base_url}/creator/login/{token}"
-    get_services().email.send(render_magic_link_mail(creator, link, settings))
-    logger.info("creator.magic_link_sent", creator_id=creator.id)
+    return f"{settings.base_url}/creator/login/{token}"
+
+
+def _send_magic_link(creator_id: int, link: str) -> None:
+    """Mail the link once the answer has gone out.
+
+    On failure the link is withdrawn: "one link at a time" must not count a
+    link that never left, or a provider hiccup locks the creator out for the
+    link's whole lifetime.
+    """
+    settings = get_settings()
+    with session_scope() as session:
+        mail = render_magic_link_mail(session.get(Creator, creator_id), link, settings)
+    try:
+        get_services().email.send(mail)
+    except Exception:
+        logger.exception(log.CREATOR_MAGIC_LINK_FAILED, creator_id=creator_id)
+        _withdraw_magic_link(creator_id, hash_token(link.rsplit("/", 1)[1]))
+        return
+    logger.info(log.CREATOR_MAGIC_LINK_SENT, creator_id=creator_id)
+
+
+def _withdraw_magic_link(creator_id: int, token_hash: str) -> None:
+    """Forget the link — unless a newer one has replaced it meanwhile."""
+    with session_scope() as session:
+        session.execute(
+            update(Creator)
+            .where(Creator.id == creator_id, Creator.magic_link_token_hash == token_hash)
+            .values(magic_link_token_hash=None, magic_link_expires_at=None)
+        )
 
 
 @router.get("/login/{token}", response_class=HTMLResponse)
@@ -125,7 +158,7 @@ def handle_login_confirm_page(token: str) -> HTMLResponse:
 def handle_login(
     token: str,
     request: Request,
-    session: Session = Depends(get_session),
+    session: DbSession,
 ) -> Response:
     """Consume the token and start the session."""
     creator = _creator_for_token(session, token)
@@ -142,7 +175,7 @@ def handle_login(
     creator.magic_link_token_hash = None
     creator.magic_link_expires_at = None
     request.session[SESSION_KEY] = creator.id
-    logger.info("creator.signed_in", creator_id=creator.id)
+    logger.info(log.CREATOR_SIGNED_IN, creator_id=creator.id)
     return RedirectResponse("/creator/einstellungen", status_code=303)
 
 
@@ -187,9 +220,9 @@ def handle_youtube_connect(
 @router.get("/youtube/callback", response_class=HTMLResponse)
 def handle_youtube_callback(
     request: Request,
+    session: DbSession,
     state: str = "",
     code: str = "",
-    session: Session = Depends(get_session),
     creator: Creator = Depends(current_creator),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
@@ -223,7 +256,7 @@ def handle_youtube_callback(
     )
     source.oauth_granted_at = datetime.now(UTC)
     source.oauth_needs_reconsent = False
-    logger.info("oauth.connected", creator_id=creator.id, source_id=source.id)
+    logger.info(log.OAUTH_CONNECTED, creator_id=creator.id, source_id=source.id)
 
     return page(
         "action_confirm",
