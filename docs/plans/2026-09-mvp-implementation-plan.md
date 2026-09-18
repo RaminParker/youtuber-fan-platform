@@ -742,7 +742,7 @@ open until it has been run against one, however green the tests are.
 
 ### M9 — Go-live (≈ 2 sessions)
 - [ ] Render Blueprint applied, secrets set, domain + mail DNS verified in Resend, DMARC published, Sentry DSN, `LOGGING__JSON=true`, Bifrost 401 smoke test.
-- [ ] Resend keys (pending the owner's answer, `implementation-notes.html` question 12): a separate sending-only key for Render, restricted to the verified domain; the local key stays local.
+- [ ] Resend keys (decided with the owner 2026-09-18, `implementation-notes.html` question 12): create a separate sending-only key for Render, restricted to the verified domain, and set it as `RESEND_API_KEY` there; the local key stays local.
 - [ ] M5's deferred acceptance: Resend webhook on `https://<domain>/webhooks/resend` (`email.bounced`, `email.complained`), `RESEND_WEBHOOK_SECRET` set, a sign-up of `bounced@resend.dev` ends with that subscriber blocked (`blocked_reason = bounce`); then `SENDER_ADDRESS` removed.
 - [ ] Google OAuth verification submitted (homepage + privacy policy live are prerequisites — M8 must be deployed first); until approved the pilot re-consents weekly or the unofficial provider carries production.
 - [ ] Pilot onboarding via the runbook: contract signed, `cli onboard`, branding, login + YouTube connect, `backfill`, first real preview reviewed together.
