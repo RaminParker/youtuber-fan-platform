@@ -94,3 +94,32 @@ class TestStdlibRouting:
 
         assert logging.getLogger("sqlalchemy.engine").level == logging.WARNING
         assert logging.getLogger("httpx").level == logging.WARNING
+
+
+class TestExceptions:
+    """A failure is exactly when the log line must not be lost."""
+
+    @staticmethod
+    def log_a_failure() -> None:
+        try:
+            raise ValueError("the provider said no")
+        except ValueError:
+            log.get_logger(__name__).exception("step.crashed")
+
+    def test_console_shows_the_traceback(self, monkeypatch, capsys):
+        configure(monkeypatch, as_json=False)
+
+        self.log_a_failure()
+
+        err = capsys.readouterr().err
+        assert "Logging error" not in err
+        assert "step.crashed" in err
+        assert "ValueError: the provider said no" in err
+
+    def test_json_keeps_it_structured(self, monkeypatch, capsys):
+        configure(monkeypatch, as_json=True)
+
+        self.log_a_failure()
+
+        record = json.loads(capsys.readouterr().err)
+        assert record["exception"][0]["exc_type"] == "ValueError"

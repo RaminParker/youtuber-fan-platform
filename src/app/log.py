@@ -63,7 +63,6 @@ _SHARED_PROCESSORS: list[Any] = [
     structlog.stdlib.add_log_level,
     structlog.processors.TimeStamper(fmt="iso", utc=True),
     structlog.processors.StackInfoRenderer(),
-    structlog.processors.dict_tracebacks,
 ]
 
 # Libraries that talk too much at their own default level.
@@ -79,15 +78,16 @@ _STDLIB_LEVELS = {
 _HAND_BACK_TO_ROOT = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
-def _renderer(settings: Settings) -> Any:
+def _renderers(settings: Settings) -> list[Any]:
     """Pick the output format.
 
     The setting alone decides JSON versus console; the TTY only decides colour,
-    so a redirected console log is still readable.
+    so a redirected console log is still readable. Tracebacks become dicts only
+    for JSON: the console renderer formats them itself and crashes on a dict.
     """
     if settings.logging.json_format:
-        return structlog.processors.JSONRenderer()
-    return structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
+        return [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()]
+    return [structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())]
 
 
 def _handlers(settings: Settings, formatter: logging.Formatter) -> list[logging.Handler]:
@@ -126,7 +126,7 @@ def configure_logging(settings: Settings) -> None:
         foreign_pre_chain=_SHARED_PROCESSORS,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            _renderer(settings),
+            *_renderers(settings),
         ],
     )
 
