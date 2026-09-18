@@ -15,7 +15,7 @@ from app import log
 from app.config import Settings, get_settings
 from app.jinja import TEMPLATE_DIR
 from app.web.limits import limiter
-from app.web.routes import creator, fan, public
+from app.web.routes import creator, fan, public, webhooks
 
 STATIC_DIR = TEMPLATE_DIR.parent / "static"
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -78,5 +78,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(public.router)
     app.include_router(fan.router)
     app.include_router(creator.router)
+    app.include_router(webhooks.router)
 
     return app

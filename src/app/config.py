@@ -165,6 +165,7 @@ class Secrets(BaseSettings):
 
     base_url: str = ""
     support_email: str = ""
+    sender_address: str = ""
     token_encryption_keys: str = ""
     youtube_api_key: str = ""
     google_oauth_client_id: str = ""
@@ -263,8 +264,12 @@ class Settings(BaseSettings):
 
     @property
     def sender_address(self) -> str:
-        """Envelope sender for every outgoing mail."""
-        return f"post@{self.mail_domain}"
+        """Envelope sender for every outgoing mail.
+
+        Overridable because the mail provider refuses every sender on a domain
+        it has not verified; until then only its own test sender works.
+        """
+        return self.secrets.sender_address or f"post@{self.mail_domain}"
 
     @property
     def support_email(self) -> str:

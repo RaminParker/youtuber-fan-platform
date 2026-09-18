@@ -71,9 +71,23 @@ Schicht, die sie benutzt:
 | Variable | Wofür | Ohne sie |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | LLM-Gateway | Gateway läuft, lehnt Anfragen aber mit „no keys found" ab |
-| `RESEND_API_KEY` | E-Mail-Versand | keine Mails |
+| `RESEND_API_KEY` | E-Mail-Versand; lokal genügt ein Key mit „Sending access" | keine Mails |
+| `RESEND_WEBHOOK_SECRET` | Signatur der Bounce- und Beschwerde-Meldungen | jede Meldung wird als ungültig verworfen |
+| `SENDER_ADDRESS` | Absender, solange die Domain bei Resend nicht verifiziert ist: `onboarding@resend.dev` | Absender `post@mail.<domain>`, den Resend ohne Verifizierung ablehnt |
 | `YOUTUBE_API_KEY` | Metadaten, Kommentare | nur der öffentliche Feed funktioniert |
 | `GOOGLE_OAUTH_CLIENT_*` | offizielle Untertitel | nur der inoffizielle Anbieter |
+
+Ohne verifizierte Domain stellt Resend nur an die Adresse des eigenen Kontos
+und an seine Testadressen (`bounced@resend.dev`, `complained@resend.dev`) zu.
+Den Webhook lokal erreichbar machen, ohne Konto:
+
+```sh
+cloudflared tunnel --url http://localhost:8000   # druckt eine https-URL
+```
+
+In Resend dann einen Webhook auf `<URL>/webhooks/resend` mit den Ereignissen
+`email.bounced` und `email.complained` anlegen und dessen Secret als
+`RESEND_WEBHOOK_SECRET` eintragen. Die URL ändert sich bei jedem Start.
 
 `.env` ist git-ignoriert. Jede Tabelle aus `config/settings.toml` lässt sich per
 Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
@@ -94,11 +108,11 @@ Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
 
 ## Stand
 
-**M0 bis M4** stehen: von „neues Video erkannt" bis „fertige Mail in drei
-Varianten". Es fehlen **M5 bis M9** — an Fans verschickt wird also noch nichts.
-Drei Bausteine warten auf ihren Aufrufer: `POST /k/{slug}` (M5), `send_batch`
-und die Webhook-Signaturprüfung (M6). Fortschritt je Meilenstein in §17 des
-Plans.
+**M0 bis M5** stehen: von „neues Video erkannt" bis „fertige Mail in drei
+Varianten", dazu der Fan-Bereich — Anmeldung mit Double-Opt-in, Abmeldung und
+die Sperre nach Bounce oder Beschwerde. Es fehlen **M6 bis M9**: Zusammenfassungen
+gehen noch an niemanden, nur Bestätigungsmails. `send_batch` wartet auf seinen
+Aufrufer (M6). Fortschritt je Meilenstein in §17 des Plans.
 
 Sprache: Code, Kommentare und Logs auf Englisch; diese Datei und alles, was Fans
 und Creator sehen, auf Deutsch.

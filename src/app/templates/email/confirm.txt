@@ -1,0 +1,14 @@
+Fast geschafft
+
+Öffne diesen Link, dann bekommst du ein paar Tage nach jedem neuen Video von
+{{ creator.name }} eine kurze Zusammenfassung per Mail:
+
+{{ link }}
+
+Du hast dich nicht angemeldet? Dann ignoriere diese Mail einfach — ohne den
+Klick bekommst du nichts.
+
+--
+Du bekommst diese Nachricht, weil sich jemand mit deiner Adresse auf
+{{ base_url }}/k/{{ creator.slug }} eingetragen hat.
+Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.

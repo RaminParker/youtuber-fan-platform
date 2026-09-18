@@ -1,5 +1,6 @@
 {% extends "pages/base.html" %}
 {% block title %}Zusammenfassungen von {{ creator.name }}{% endblock %}
+{% block head %}<script src="/static/htmx.min.js" defer></script>{% endblock %}
 {% block content %}
   <header class="creator">
     {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="56" height="56">{% endif %}
@@ -12,15 +13,7 @@
   die Community reagiert hat.</p>
   <p>Eine Mail pro Video. Keine Werbung. Abmelden mit einem Klick.</p>
 
-  <form method="post" action="/k/{{ creator.slug }}">
-    <label for="email">Deine E-Mail-Adresse</label>
-    <input type="email" id="email" name="email" required autocomplete="email"
-           autocapitalize="off" spellcheck="false">
-    <p><button type="submit">Eintragen</button></p>
-  </form>
-
-  <p class="muted">Wir schicken dir zuerst eine Bestätigungsmail. Erst wenn du darauf
-  klickst, bist du dabei.</p>
+  {% include "partials/signup_form.html" %}
 
   <footer class="platform">
     Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.

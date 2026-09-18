@@ -131,6 +131,27 @@ def render_magic_link_mail(creator: Creator, link: str, settings: Settings) -> O
     )
 
 
+def render_confirm_mail(
+    creator: Creator, address: str, link: str, settings: Settings
+) -> OutgoingEmail:
+    """Build the double-opt-in mail, which is also the welcome mail.
+
+    It carries no link to a summary: those pages must not reach an address that
+    has not proved it wants them. Without an idempotency key, because asking
+    again after a lost mail is exactly what the fan is supposed to do.
+    """
+    html, text = render_pair("confirm", creator, link=link)
+    return OutgoingEmail(
+        from_=sender(creator, settings),
+        to=address,
+        subject=f"Bitte bestätige: Zusammenfassungen von {creator.name}",
+        html=html,
+        text=text,
+        reply_to=reply_to(creator, settings),
+        tags={"kind": "confirm"},
+    )
+
+
 @dataclass(frozen=True)
 class Notice:
     """The German wording for one kind of creator notice."""

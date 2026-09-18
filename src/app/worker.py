@@ -170,15 +170,30 @@ def run_due_steps(now: datetime) -> int:
     return len(due)
 
 
+#: The manifest's retention periods are days; a daily sweep honours them.
+CLEANUP_EVERY = timedelta(days=1)
+
+
 def run_periodic_jobs(now: datetime, settings: Settings) -> None:
-    """Run the jobs that go by the clock rather than by a row's status."""
-    every = timedelta(hours=settings.worker.feed_poll_hours)
-    try:
-        with session_scope() as session:
-            if steps.job_is_due(session, steps.POLL_FEEDS, now, every):
-                steps.poll_feeds(session, now)
-    except Exception:
-        logger.exception("worker.periodic_failed")
+    """Run the jobs that go by the clock rather than by a row's status.
+
+    Each in its own transaction, so a failing poll never costs the cleanup.
+    """
+    jobs = (
+        (
+            steps.POLL_FEEDS,
+            timedelta(hours=settings.worker.feed_poll_hours),
+            lambda session: steps.poll_feeds(session, now),
+        ),
+        (steps.CLEANUP, CLEANUP_EVERY, lambda session: steps.cleanup(session, now, settings)),
+    )
+    for name, every, run in jobs:
+        try:
+            with session_scope() as session:
+                if steps.job_is_due(session, name, now, every):
+                    run(session)
+        except Exception:
+            logger.exception("worker.periodic_failed", job=name)
 
 
 def run_tick(now: datetime, settings: Settings | None = None) -> None:

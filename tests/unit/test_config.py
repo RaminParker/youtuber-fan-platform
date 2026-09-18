@@ -81,6 +81,12 @@ class TestDerivedAddresses:
 
         assert get_settings().support_email == "owner@example.org"
 
+    def test_the_sender_can_be_overridden_until_the_domain_is_verified(self, monkeypatch):
+        monkeypatch.setenv("SENDER_ADDRESS", "onboarding@resend.dev")
+        get_settings.cache_clear()
+
+        assert get_settings().sender_address == "onboarding@resend.dev"
+
     def test_base_url_can_be_overridden_for_local_development(self, monkeypatch):
         monkeypatch.setenv("BASE_URL", "http://localhost:8000")
         get_settings.cache_clear()

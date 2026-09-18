@@ -1,0 +1,15 @@
+{% extends "email/base.html" %}
+{% block subject %}Bitte bestätige deine Anmeldung{% endblock %}
+{% block header_line %}Zusammenfassungen für Abonnenten von {{ creator.name }}{% endblock %}
+{% block content %}
+  <h1>Fast geschafft</h1>
+  <p>Klick auf den Knopf, dann bekommst du ein paar Tage nach jedem neuen Video von
+  {{ creator.name }} eine kurze Zusammenfassung per Mail.</p>
+  <p><a class="button" href="{{ link }}">Ja, ich bin dabei</a></p>
+  <p>Du hast dich nicht angemeldet? Dann ignoriere diese Mail einfach — ohne den
+  Klick bekommst du nichts.</p>
+{% endblock %}
+{% block footer_reason %}
+  Du bekommst diese Nachricht, weil sich jemand mit deiner Adresse auf
+  {{ base_url }}/k/{{ creator.slug }} eingetragen hat.
+{% endblock %}

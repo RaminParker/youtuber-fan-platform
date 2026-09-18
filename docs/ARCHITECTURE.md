@@ -140,6 +140,27 @@ later write would otherwise roll back the record of what it spent, and ten
 retries would re-pay against a ledger that never grew — defeating the one
 mechanism that exists to stop exactly that.
 
+## The fan area
+
+Sign-up, confirmation and unsubscribe live in `web/routes/fan.py`, the bounce
+webhook in `web/routes/webhooks.py`, the retention sweep in `jobs/steps.py`
+(`cleanup`, daily). Three rules hold them together:
+
+- **The public form can only add, never take away.** A confirmed fan who signs
+  up again gets the confirm mail again and nothing else changes. A complaint
+  block is permanent and silent; a bounce block is lifted by the next
+  confirmation, because that mail evidently arrived.
+- **The answer never depends on the address.** New, known, blocked, throttled,
+  or the mail provider down: always "Schau in dein Postfach". Concurrent
+  sign-ups of one address go through `INSERT … ON CONFLICT` and a row lock, so
+  they cannot end in a unique-violation 500 that would answer differently.
+- **Two brakes, because one is forgeable.** The per-IP limit trusts forwarded
+  addresses; `subscriptions.confirm_sent_at` limits confirm mails per address
+  regardless of where the request came from.
+
+Blocked subscribers are kept as the suppression list; the cleanup deletes only
+addresses that have neither a subscription nor a block.
+
 ## Still to be written
 
 The mailing transition table and the exactly-once mechanics belong here once M6

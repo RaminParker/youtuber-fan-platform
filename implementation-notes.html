@@ -60,7 +60,7 @@
 <p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
 <p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
 <code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
-Stand: 11.09.2026 — Planprüfung abgeschlossen, Meilensteine M0 bis M4 umgesetzt, anschließend adversarial gegengelesen und die gefundenen Fehler behoben, danach ein Vereinfachungs-Durchgang (352 Tests grün, Lint sauber).</p>
+Stand: 18.09.2026 — M5 (Fan-Bereich) umgesetzt, 408 Tests grün, Lint sauber. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
 
 <div class="toc">
   <strong>Inhalt</strong>
@@ -515,6 +515,94 @@ sondern Verhalten.</p>
   <code>.env</code> — er wird gebraucht, bevor es überhaupt Settings gibt. Damit stimmt der Befehl in der README.</p>
 </div>
 
+<h3>Beim Bauen von M5</h3>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">M5</span><span class="tag">webhooks.py</span></div>
+  <h4>Eine Beschwerde überschreibt eine Bounce-Sperre, nie umgekehrt</h4>
+  <p>Plan §10 schreibt für den Webhook <code>blocked_reason = COALESCE(blocked_reason, :reason)</code>. Das hält den
+  ersten Grund fest — auch wenn der erste ein Bounce war und danach eine Beschwerde kommt. Die Bounce-Sperre hebt aber
+  die nächste Bestätigung wieder auf (§7). Ergebnis: Wer sich über Spam beschwert hat, bekäme nach einer neuen
+  Anmeldung wieder Mails.</p>
+  <span class="label">Gewählt</span>
+  <p>Das Datum bleibt beim ersten Mal (<code>COALESCE</code>), der Grund wird zu <code>complaint</code>, sobald eine
+  Beschwerde eingeht, und fällt nie zurück. Weiterhin reines Setzen eines Werts, also sind Wiederholungen folgenlos.
+  Ein Test hält die Reihenfolge Bounce → Beschwerde fest.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">M5</span><span class="tag">fan.py</span></div>
+  <h4>Ein alter Bestätigungslink macht keine Abmeldung rückgängig</h4>
+  <p>Der Plan regelt den Bestätigungslink für <code>pending</code> und <code>confirmed</code>, nicht für
+  <code>unsubscribed</code> — und der Token bleibt nach der Bestätigung bestehen. Hätte der Link auch dann bestätigt,
+  hätte ein Scanner, der eine alte Mail durchgeht, eine Abmeldung per GET ungeschehen gemacht.</p>
+  <span class="label">Gewählt</span>
+  <p>Abgemeldet heißt: Der alte Link gilt nicht mehr, die Seite (410) bietet „Neu eintragen" an. Dieselbe Seite
+  bekommt ein abgelaufener oder unbekannter Link.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">M5</span><span class="tag">fan.py</span></div>
+  <h4>Anmeldung: <code>ON CONFLICT</code> plus Zeilensperre, Drossel erst nach erfolgreichem Versand</h4>
+  <p>Zwei gleichzeitige Anmeldungen derselben Adresse hätten mit „erst suchen, dann einfügen" in einer
+  Unique-Verletzung geendet — ein 500er, also eine Antwort, die sich von allen anderen unterscheidet. Und eine
+  Drossel, die schon greift, wenn die Mail gar nicht rausging, sperrt den Fan zehn Minuten aus.</p>
+  <span class="label">Gewählt</span>
+  <p>Subscriber und Abo per <code>INSERT … ON CONFLICT DO NOTHING</code>, danach <code>SELECT … FOR UPDATE</code>
+  (nur auf <code>subscriptions</code> — Postgres verweigert die Sperre auf dem Outer Join, den die Relationship
+  erzeugt). Der Zustand wird committet, <em>bevor</em> die Mail rausgeht: Die Mail trägt nie einen Token, den die
+  Datenbank nicht kennt. Scheitert der Versand, wird <code>confirm_sent_at</code> zurückgesetzt.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M5</span><span class="tag">fan.py</span></div>
+  <h4>Eine ungültige Adresse bekommt eine Fehlermeldung, keine Postfach-Antwort</h4>
+  <p>„Immer dieselbe Antwort" schützt davor, dass jemand herausfindet, wer eingetragen ist. Eine erkennbar
+  ungültige Adresse verrät darüber nichts. Ihr „Schau in dein Postfach" zu antworten, hieße nur, dass jemand mit
+  Tippfehler auf eine Mail wartet, die nie kommt. Die Prüfung ist bewusst locker (etwas@etwas.tld, höchstens
+  320 Zeichen): Die eigentliche Prüfung ist die Bestätigungsmail.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M5</span><span class="tag">fan.py</span></div>
+  <h4>Abmeldeseiten nennen den Kanal und tragen seine Farbe</h4>
+  <p>Beim Durchklicken im Browser aufgefallen: „von diesem Kanal" sagt einem Fan, der mehreren Kanälen folgt, nicht,
+  welchen er gerade verlässt. Beide Seiten schlagen den Creator jetzt über den Token nach. Dabei kam eine Lücke im
+  Basis-Template zum Vorschein: Jinjas <code>default</code> greift nicht bei <code>None</code>, eine Seite ohne
+  Creator hätte <code>--accent: None</code> gerendert. Jetzt <code>default(…, true)</code>, mit Test.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Fehler</span><span class="tag">log.py</span></div>
+  <h4>Im Konsolenformat ging jeder Fehler-Traceback verloren</h4>
+  <p>Im Container-Log beim Browser-Test gefunden, nicht durch die Tests: Jeder <code>logger.exception(…)</code>
+  scheiterte im Konsolenformat mit „Logging error … can only concatenate str (not "list") to str". Ursache:
+  <code>dict_tracebacks</code> stand in der gemeinsamen Prozessorkette und machte die Exception zu einer Liste von
+  Dicts — richtig für JSON, ein Absturz für den <code>ConsoleRenderer</code>. Lokal sah man also bei jedem Fehler
+  (<code>worker.step_crashed</code>, <code>creator.magic_link_failed</code> …) nur einen Logging-Dump statt des
+  Tracebacks. In Produktion (JSON) war es unauffällig.</p>
+  <span class="label">Behoben</span>
+  <p>Test zuerst (scheiterte genauso), dann <code>dict_tracebacks</code> nur noch vor dem JSON-Renderer.
+  Zwei Tests halten beide Formate fest.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Umgebung</span><span class="tag">.venv</span></div>
+  <h4><code>uv run pytest</code> startete nach dem Umzug an die Repo-Wurzel nicht mehr</h4>
+  <p>Die Skripte im <code>.venv</code> trugen per Shebang noch den alten Pfad (<code>…/myStartups/myStartups/.venv</code>).
+  Kein Code-Problem, rein lokal: <code>uv sync --locked --reinstall</code> behebt es. Wer das Repo vor Commit
+  587564b ausgecheckt hatte, braucht denselben Befehl einmal. CI ist nicht betroffen.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">CI</span><span class="tag">ci.yml</span></div>
+  <h4><code>setup-uv</code> auf einen festen Tag gepinnt, nicht auf die Major-Version</h4>
+  <p>GitHub warnte, dass <code>checkout@v4</code> und <code>setup-uv@v5</code> auf Node 20 laufen. <code>checkout</code>
+  geht auf <code>@v7</code>. Bei <code>setup-uv</code> gibt es seit v8 keinen gleitenden Major-Tag mehr —
+  <code>@v10</code> hätte den Lauf mit „action not found" beendet. Deshalb <code>@v10.1.0</code>. Die Cache-Änderung
+  in v10 trifft uns nicht, weil wir <code>enable-cache: true</code> ausdrücklich setzen.</p>
+</div>
+
 <h2 id="abweichungen">3. Abweichungen vom Plan</h2>
 <p class="meta">Bewusste Abweichungen von der Spezifikation, mit Begründung.</p>
 
@@ -563,6 +651,27 @@ sondern Verhalten.</p>
   <p>Wichtiger: <code>Secrets</code> liest <code>.env</code>. Damit bestanden zwei Tests nur auf Maschinen <em>ohne</em>
   passende <code>.env</code> — ein Test, der von der Entwicklermaschine abhängt, ist keiner. Die Fixture schaltet
   das Dotenv für jeden Test ab.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">M5</span><span class="tag">config.py</span></div>
+  <h4>Neue optionale Variable <code>SENDER_ADDRESS</code></h4>
+  <p>Plan §6.2 leitet den Absender fest aus der Domain ab (<code>post@mail.&lt;domain&gt;</code>). Resend lehnt
+  aber jeden Absender auf einer nicht verifizierten Domain ab, und die Domain gibt es erst mit M9. Ohne Override
+  ließe sich die Abnahme von M5 nicht durchführen.</p>
+  <span class="label">Gewählt (mit dir abgestimmt)</span>
+  <p>Eine optionale Umgebungsvariable nach dem Muster von <code>SUPPORT_EMAIL</code>, lokal auf
+  <code>onboarding@resend.dev</code>. Leer bleibt alles beim abgeleiteten Absender. In <code>render.yaml</code>
+  steht sie bewusst nicht: In Produktion ist die Domain verifiziert.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">M5</span><span class="tag">static/</span></div>
+  <h4>HTMX war nicht abgelegt, obwohl Plan §4 und §5 es als vorhanden führen</h4>
+  <p><code>static/</code> enthielt nur <code>style.css</code>. <code>htmx.min.js</code> 2.0.10 liegt jetzt dort, gegen die
+  Prüfsumme von jsDelivr verifiziert. Ohne JavaScript liefert dieselbe Route die ganze Seite. Bekannte Grenze: Die
+  429-Antwort des Rate-Limiters ist JSON, und htmx 2 tauscht bei 4xx nichts aus — ein gedrosselter Fan sieht
+  nach dem Klick also keine Reaktion. Bei 20 Anfragen pro Minute und IP trifft das kaum einen Menschen.</p>
 </div>
 
 <h2 id="kompromisse">4. Kompromisse</h2>
@@ -719,4 +828,15 @@ jeweils genannten Standard weiter.</p>
   <span class="label">Was du entscheiden musst</span>
   <p>Die saubere Lösung ist, statt <code>*</code> die Proxy-Adressen von Render einzutragen. Welche das sind,
   kann ich nicht verifizieren — das steht in Renders Dokumentation und gehört vor M9 geklärt.</p>
+</div>
+
+<div class="entry open">
+  <h4>10. Ungültige Webhook-Signatur beantworten wir mit 200</h4>
+  <p>Plan §10 verlangt „always 200". Ich habe das so umgesetzt: Eine gefälschte Anfrage bekommt keine Erklärung,
+  und der Anbieter wiederholt nichts. Die Kehrseite: Ist <code>RESEND_WEBHOOK_SECRET</code> falsch oder leer, gehen
+  <em>alle</em> Bounce-Meldungen still verloren. Sichtbar ist das nur als WARNING
+  <code>webhook.resend signature_ok=false</code> im Log und im Resend-Dashboard als „erfolgreich zugestellt".</p>
+  <span class="label">Zu bestätigen</span>
+  <p>Entweder so lassen und beim Go-live einmal den Test-Bounce prüfen, oder bei ungültiger Signatur 401 antworten —
+  dann zeigt das Dashboard die Fehlkonfiguration, und Resend wiederholt, bis sie behoben ist.</p>
 </div>

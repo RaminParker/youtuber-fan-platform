@@ -1,0 +1,21 @@
+{% extends "pages/base.html" %}
+{% block title %}Dabei! — {{ creator.name }}{% endblock %}
+{% block content %}
+  <header class="creator">
+    {% if creator.logo_url %}<img src="{{ creator.logo_url }}" alt="" width="56" height="56">{% endif %}
+    <div><strong>{{ creator.name }}</strong></div>
+  </header>
+
+  <h1>Dabei!</h1>
+  <p>Ab jetzt bekommst du ein paar Tage nach jedem neuen Video eine kurze
+  Zusammenfassung per Mail. Abmelden geht in jeder Mail mit einem Klick.</p>
+  {% if newest_view_token %}
+  <p><a href="{{ base_url }}/s/{{ newest_view_token }}">So sieht die neueste Zusammenfassung aus</a></p>
+  {% endif %}
+
+  <footer class="platform">
+    Automatisch erstellt mit {{ product.name }} — kein Ersatz für das Original.
+    <a href="{{ base_url }}/impressum">Impressum</a> ·
+    <a href="{{ base_url }}/datenschutz">Datenschutz</a>
+  </footer>
+{% endblock %}

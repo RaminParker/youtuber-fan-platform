@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="page" style="--accent: {{ accent_color|default('#333333') }}">
+  <main class="page" style="--accent: {{ accent_color|default('#333333', true) }}">
     {% block content %}{% endblock %}
   </main>
 </body>

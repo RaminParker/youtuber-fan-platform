@@ -1,0 +1,19 @@
+{# The form and its answer, in one place: the page renders it whole, and an
+   HTMX request gets it back in place of the form. #}
+<div id="signup">
+{% if sent %}
+  <p role="status"><strong>Schau in dein Postfach.</strong> Wir haben dir eine Mail
+  geschickt. Erst wenn du auf den Link darin klickst, bist du dabei.</p>
+{% else %}
+  <form method="post" action="/k/{{ creator.slug }}"
+        hx-post="/k/{{ creator.slug }}" hx-target="#signup" hx-swap="outerHTML">
+    <label for="email">Deine E-Mail-Adresse</label>
+    <input type="email" id="email" name="email" required autocomplete="email"
+           autocapitalize="off" spellcheck="false"{% if error %} aria-invalid="true" aria-describedby="email-error"{% endif %}>
+    {% if error %}<p id="email-error" role="alert">{{ error }}</p>{% endif %}
+    <p><button type="submit">Eintragen</button></p>
+  </form>
+  <p class="muted">Wir schicken dir zuerst eine Bestätigungsmail. Erst wenn du darauf
+  klickst, bist du dabei.</p>
+{% endif %}
+</div>

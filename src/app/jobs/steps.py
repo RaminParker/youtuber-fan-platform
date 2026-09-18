@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,9 @@ from app.db.models import (
     NoticeKind,
     SkipReason,
     Source,
+    Subscriber,
+    Subscription,
+    SubscriptionStatus,
     Transcript,
     TranscriptOrigin,
 )
@@ -57,6 +60,7 @@ from app.transcripts.base import (
 )
 
 POLL_FEEDS = "poll_feeds"
+CLEANUP = "cleanup"
 
 logger = log.get_logger(__name__)
 
@@ -261,6 +265,38 @@ def poll_feeds(session: Session, now: datetime) -> int:
 
     _record_run(session, POLL_FEEDS, now)
     return new_items
+
+
+def cleanup(session: Session, now: datetime, settings: Settings) -> None:
+    """Delete what we have no reason to keep (manifest §7.9, plan §13).
+
+    Sign-ups never confirmed, and unsubscriptions past their retention. Then
+    every address left without a subscription — unless it is blocked, because
+    blocked addresses are the suppression list.
+
+    The re-check of deleted videos joins this job with the send path (M6).
+    """
+    retention = timedelta(days=settings.email.unsubscribed_retention_days)
+    expired = session.execute(
+        delete(Subscription).where(
+            (
+                (Subscription.status == SubscriptionStatus.PENDING)
+                & (Subscription.confirm_expires_at < now)
+            )
+            | (
+                (Subscription.status == SubscriptionStatus.UNSUBSCRIBED)
+                & (Subscription.unsubscribed_at < now - retention)
+            )
+        )
+    ).rowcount
+    orphans = session.execute(
+        delete(Subscriber).where(
+            Subscriber.blocked_at.is_(None),
+            ~select(Subscription.id).where(Subscription.subscriber_id == Subscriber.id).exists(),
+        )
+    ).rowcount
+    logger.info("cleanup.done", subscriptions=expired, subscribers=orphans)
+    _record_run(session, CLEANUP, now)
 
 
 def job_is_due(session: Session, name: str, now: datetime, every: timedelta) -> bool:

@@ -304,3 +304,15 @@ class TestPollFailure:
             run = session.get(JobRun, steps.POLL_FEEDS)
             assert run is not None, "a failed poll must still count as having run"
             assert run.last_run_at == NOW
+
+
+class TestCleanupSchedule:
+    def test_the_tick_runs_the_cleanup_once_a_day(self, pilot, fake_services):
+        set_services(fakes.services())
+
+        with mock_feed(lambda channel_id, client=None: []):
+            worker.run_tick(NOW, get_settings())
+            worker.run_tick(NOW + timedelta(hours=23), get_settings())
+
+        with session_scope() as session:
+            assert session.get(JobRun, steps.CLEANUP).last_run_at == NOW
