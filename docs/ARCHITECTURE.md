@@ -15,6 +15,9 @@ the code that exists is cut, and records the decisions behind it.
 | how the product is addressed | `settings.product.name`, the one place the name lives |
 | what the worker does per tick | `src/app/worker.py` |
 | what a page or a mail looks like | `src/app/templates/` |
+| the sign-up, confirm and unsubscribe rules | `src/app/subscriptions.py` |
+| what counts as a valid address | `src/app/addresses.py` |
+| what was deferred, and when to build it | `docs/backlog.md` |
 
 ## The cut
 
@@ -102,6 +105,16 @@ The mail variant governs the mail only. If the page mirrored the variant, a
 teaser mail's "weiterlesen" link would arrive at the same teaser, and the full
 text would exist nowhere.
 
+### Blocks are permanent, and the app holds a sending-only key
+
+Decided 2026-09-18. The plan first let a confirmation lift a bounce block. That
+cannot work with Resend: a hard bounce puts the address on an account-wide
+suppression list that does not expire, so the confirm mail never arrives; and
+removing an entry needs a full-access key, which could also delete domains and
+read every mail. Least privilege won: the app keeps a key that can only send,
+blocks are permanent, and the rare fan whose mailbox works again is unblocked
+by the operator (see "The fan area").
+
 ## The pipeline as it stands
 
 `detected → enriched → transcribed → analyzed`, with four terminal exits
@@ -142,24 +155,53 @@ mechanism that exists to stop exactly that.
 
 ## The fan area
 
-Sign-up, confirmation and unsubscribe live in `web/routes/fan.py`, the bounce
-webhook in `web/routes/webhooks.py`, the retention sweep in `jobs/steps.py`
-(`cleanup`, daily). Three rules hold them together:
+The rules live in `subscriptions.py` (sign-up, confirm, unsubscribe, the
+confirm mail) and `addresses.py` (what an address is); `web/routes/fan.py` only
+speaks HTTP. The bounce webhook is `web/routes/webhooks.py`, the retention
+sweep `cleanup` in `jobs/steps.py` (daily). Four rules hold them together:
 
 - **The public form can only add, never take away.** A confirmed fan who signs
-  up again gets the confirm mail again and nothing else changes. A complaint
-  block is permanent and silent; a bounce block is lifted by the next
-  confirmation, because that mail evidently arrived.
-- **The answer never depends on the address.** New, known, blocked, throttled,
-  or the mail provider down: always "Schau in dein Postfach". Concurrent
-  sign-ups of one address go through `INSERT … ON CONFLICT` and a row lock, so
-  they cannot end in a unique-violation 500 that would answer differently.
+  up again gets the confirm mail again and nothing else changes.
+- **A block is permanent.** Bounce, complaint and `email.suppressed` all block
+  the address for every creator; a complaint outranks a bounce and is never
+  replaced by one. The blocks mirror Resend's account-wide suppression list,
+  which does not expire — a mail to a blocked address would be dropped anyway,
+  and editing that list needs a full-access API key the app deliberately does
+  not hold. **To unblock** a fan whose mailbox works again (operator only,
+  never for a complaint): remove the address from the suppression list in the
+  Resend dashboard, then
+  `UPDATE subscribers SET blocked_at = NULL, blocked_reason = NULL WHERE email = '…';`
+- **The answer never depends on the address — not its text, not its timing.**
+  New, known, blocked, throttled, or the mail provider down: always "Schau in
+  dein Postfach", and just as fast, because the confirm mail is sent after the
+  response. Only an address that cannot receive mail at all (strict syntax,
+  MX lookup) gets the form back with an error.
 - **Two brakes, because one is forgeable.** The per-IP limit trusts forwarded
-  addresses; `subscriptions.confirm_sent_at` limits confirm mails per address
-  regardless of where the request came from.
+  addresses; the per-address brake allows one confirm mail per address per
+  window across all creators. It reads the address row under a lock taken by
+  `INSERT … ON CONFLICT DO UPDATE … RETURNING`, so two simultaneous sign-ups
+  run one after the other and the second is throttled.
 
-Blocked subscribers are kept as the suppression list; the cleanup deletes only
-addresses that have neither a subscription nor a block.
+The cleanup deletes expired sign-ups, old unsubscriptions and then every
+address without a subscription — except complaint blocks, which are what stops
+a new sign-up. It skips (`SKIP LOCKED`) any address a sign-up holds, so it can
+never cascade into a subscription being added.
+
+## Request handling
+
+Rules every route inherits, so no route can forget them (`web/server.py`,
+`web/deps.py`):
+
+- **Commit before the answer.** Routes take their session as `DbSession`
+  (`Depends(get_session, scope="function")`): it commits before the response
+  is sent. A page that says "done" never goes out ahead of a failed commit.
+- **Mail after the answer.** Anything a response time could betray goes into a
+  background task, which runs only after a successful commit.
+- **Hostile input is refused early.** Bodies over 64 KiB get 413; a path with a
+  control character is a 404 before it reaches a route; the webhook answers
+  401 to anything unsigned, including when no secret is configured.
+- **Nothing personal leaves in an error report.** Sentry gets no frame locals,
+  no request bodies, no PII.
 
 ## Still to be written
 

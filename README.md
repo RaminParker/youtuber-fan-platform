@@ -58,6 +58,11 @@ uv run app demo-mails pilot --count 3  # Mails aller Varianten nach out/
 uv run app eval-prompts                # Prompts gegen Beispieltranskripte
 ```
 
+Eine gesperrte Adresse (Bounce, Beschwerde) bekommt nie wieder Mail — die
+Sperre spiegelt Resends eigene Sperrliste. Wie der Betreiber eine Adresse
+entsperrt, deren Postfach wieder funktioniert, steht in `docs/ARCHITECTURE.md`
+unter „The fan area".
+
 Diese Befehle nehmen auf und berichten — Pipeline-Schritte führt nur der
 Worker aus. Sie sprechen mit YouTube beziehungsweise dem LLM-Gateway; ohne den
 passenden Schlüssel brechen sie mit einer Meldung ab, die sagt, welcher fehlt.
@@ -71,23 +76,21 @@ Schicht, die sie benutzt:
 | Variable | Wofür | Ohne sie |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | LLM-Gateway | Gateway läuft, lehnt Anfragen aber mit „no keys found" ab |
-| `RESEND_API_KEY` | E-Mail-Versand; lokal genügt ein Key mit „Sending access" | keine Mails |
-| `RESEND_WEBHOOK_SECRET` | Signatur der Bounce- und Beschwerde-Meldungen | jede Meldung wird als ungültig verworfen |
+| `RESEND_API_KEY` | E-Mail-Versand — ein Key mit „Sending access"; mehr Rechte braucht die App nie | keine Mails |
+| `RESEND_WEBHOOK_SECRET` | Signatur der Bounce- und Beschwerde-Meldungen | jede Meldung wird mit 401 abgewiesen (Resend zeigt das im Dashboard) |
 | `SENDER_ADDRESS` | Absender, solange die Domain bei Resend nicht verifiziert ist: `onboarding@resend.dev` | Absender `post@mail.<domain>`, den Resend ohne Verifizierung ablehnt |
 | `YOUTUBE_API_KEY` | Metadaten, Kommentare | nur der öffentliche Feed funktioniert |
 | `GOOGLE_OAUTH_CLIENT_*` | offizielle Untertitel | nur der inoffizielle Anbieter |
 
 Ohne verifizierte Domain stellt Resend nur an die Adresse des eigenen Kontos
-und an seine Testadressen (`bounced@resend.dev`, `complained@resend.dev`) zu.
-Den Webhook lokal erreichbar machen, ohne Konto:
+und an seine Testadressen (`delivered@resend.dev`, `bounced@resend.dev`) zu.
 
-```sh
-cloudflared tunnel --url http://localhost:8000   # druckt eine https-URL
-```
-
-In Resend dann einen Webhook auf `<URL>/webhooks/resend` mit den Ereignissen
-`email.bounced` und `email.complained` anlegen und dessen Secret als
-`RESEND_WEBHOOK_SECRET` eintragen. Die URL ändert sich bei jedem Start.
+Den Webhook erreicht Resend nur über eine öffentliche Adresse. Lokal ginge das
+mit einem Tunnel (`cloudflared tunnel --url http://localhost:8000`) — aber nur
+in einem Netz, in dem Tunnel erlaubt sind, und nie von einem Firmenrechner.
+Die echte Abnahme des Webhooks findet deshalb auf Render statt (Plan §17, M9).
+Ohne Webhook laufen die Tests trotzdem vollständig: Sie signieren ihre
+Ereignisse selbst.
 
 `.env` ist git-ignoriert. Jede Tabelle aus `config/settings.toml` lässt sich per
 Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
@@ -103,16 +106,19 @@ Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
 | `tests/` | Unit- und Integrationstests, Fakes in `fakes.py` |
 | `docs/manifest/` | Die Spezifikation |
 | `docs/plans/` | Implementierungspläne, Fortschritt in §17 |
+| `docs/backlog.md` | Alles, was bewusst nach dem MVP kommt — mit dem Auslöser, ab dem es sich lohnt |
 | `docs/ARCHITECTURE.md` | Modulschnitt, Entscheidungen, „Wo finde ich was" |
 | `implementation-notes.html` | Wo die Umsetzung vom Plan abweicht und warum |
 
 ## Stand
 
 **M0 bis M5** stehen: von „neues Video erkannt" bis „fertige Mail in drei
-Varianten", dazu der Fan-Bereich — Anmeldung mit Double-Opt-in, Abmeldung und
-die Sperre nach Bounce oder Beschwerde. Es fehlen **M6 bis M9**: Zusammenfassungen
-gehen noch an niemanden, nur Bestätigungsmails. `send_batch` wartet auf seinen
-Aufrufer (M6). Fortschritt je Meilenstein in §17 des Plans.
+Varianten", dazu der Fan-Bereich — Anmeldung mit Double-Opt-in und strenger
+Adressprüfung, Abmeldung, die Sperre nach Bounce oder Beschwerde. M5 ist nach
+einem Code-Review gehärtet (Plan §13). Es fehlen **M6 bis M9**: Zusammenfassungen
+gehen noch an niemanden, nur Bestätigungsmails; der echte Bounce-Webhook wird
+mit dem Deployment abgenommen (M9). `send_batch` wartet auf seinen Aufrufer
+(M6). Fortschritt je Meilenstein in §17 des Plans.
 
 Sprache: Code, Kommentare und Logs auf Englisch; diese Datei und alles, was Fans
 und Creator sehen, auf Deutsch.

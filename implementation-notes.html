@@ -60,7 +60,7 @@
 <p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
 <p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
 <code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
-Stand: 18.09.2026 — M5 (Fan-Bereich) umgesetzt, 408 Tests grün, Lint sauber. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
+Stand: 18.09.2026 — M5 (Fan-Bereich) umgesetzt, per Code-Review geprüft und gehärtet: 482 Tests grün, Lint sauber. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
 
 <div class="toc">
   <strong>Inhalt</strong>
@@ -528,6 +528,11 @@ sondern Verhalten.</p>
   <p>Das Datum bleibt beim ersten Mal (<code>COALESCE</code>), der Grund wird zu <code>complaint</code>, sobald eine
   Beschwerde eingeht, und fällt nie zurück. Weiterhin reines Setzen eines Werts, also sind Wiederholungen folgenlos.
   Ein Test hält die Reihenfolge Bounce → Beschwerde fest.</p>
+  <span class="label">Nachtrag 18.09. (Code-Review)</span>
+  <p>Die Begründung „die nächste Bestätigung hebt die Bounce-Sperre auf" gilt nicht mehr: Sperren sind jetzt
+  dauerhaft (siehe unten). Die Regel selbst bleibt und ist jetzt in beide Richtungen getestet — auch Beschwerde →
+  Bounce darf die Beschwerde nicht zurückstufen. Das <code>UPDATE</code> ändert nur noch Zeilen, die sich wirklich
+  ändern; ein Replay trifft nichts und loggt nichts.</p>
 </div>
 
 <div class="entry important">
@@ -552,6 +557,13 @@ sondern Verhalten.</p>
   (nur auf <code>subscriptions</code> — Postgres verweigert die Sperre auf dem Outer Join, den die Relationship
   erzeugt). Der Zustand wird committet, <em>bevor</em> die Mail rausgeht: Die Mail trägt nie einen Token, den die
   Datenbank nicht kennt. Scheitert der Versand, wird <code>confirm_sent_at</code> zurückgesetzt.</p>
+  <span class="label">Nachtrag 18.09. (Code-Review)</span>
+  <p>Beides reichte nicht. <code>DO NOTHING</code> sperrt eine <em>bestehende</em> Zeile nicht, und die Sperre lag
+  auf dem Abo statt auf der Adresse — dieselbe Adresse bei zwei Kanälen gleichzeitig bekam zwei Mails. Jetzt
+  <code>INSERT … ON CONFLICT DO UPDATE … RETURNING</code> auf <code>subscribers</code>: gibt die Zeile immer zurück
+  und sperrt sie in derselben Anweisung. Die Mail geht nicht mehr im Request raus, sondern danach als
+  Hintergrund-Task. Ein Zwei-Session-Test hält die Sperre fest; er ist gegen die alte Variante gelaufen und
+  gescheitert.</p>
 </div>
 
 <div class="entry minor">
@@ -561,6 +573,10 @@ sondern Verhalten.</p>
   ungültige Adresse verrät darüber nichts. Ihr „Schau in dein Postfach" zu antworten, hieße nur, dass jemand mit
   Tippfehler auf eine Mail wartet, die nie kommt. Die Prüfung ist bewusst locker (etwas@etwas.tld, höchstens
   320 Zeichen): Die eigentliche Prüfung ist die Bestätigungsmail.</p>
+  <span class="label">Nachtrag 18.09. (Code-Review)</span>
+  <p>„Locker" war der Fehler: <code>&lt;opfer@x.org&gt;</code> und ähnliche Schreibweisen waren je eine eigene Zeile
+  und umgingen Bremse und Beschwerde-Sperre. Jetzt streng (siehe unten), und die Fehlermeldung behält das
+  Eingegebene im Feld.</p>
 </div>
 
 <div class="entry minor">
@@ -601,6 +617,136 @@ sondern Verhalten.</p>
   geht auf <code>@v7</code>. Bei <code>setup-uv</code> gibt es seit v8 keinen gleitenden Major-Tag mehr —
   <code>@v10</code> hätte den Lauf mit „action not found" beendet. Deshalb <code>@v10.1.0</code>. Die Cache-Änderung
   in v10 trifft uns nicht, weil wir <code>enable-cache: true</code> ausdrücklich setzen.</p>
+</div>
+
+<h3>Nach dem Code-Review von M5 (18.09.2026)</h3>
+<p class="meta">Ein Review des fertigen Meilensteins fand 15 verifizierte Befunde, die meisten nachgestellt. Alle sind
+test-first behoben; wo eine Regel Privatsphäre oder Versand-Ruf schützt, ist der Test gegen eine Mutante gelaufen und
+gescheitert. Die geänderten Planstellen tragen den Marker „<em>Changed 2026-09-18</em>".</p>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">Sicherheit</span><span class="tag">email_client.py</span></div>
+  <h4>Ohne Webhook-Secret konnte jeder beliebige Adressen dauerhaft sperren</h4>
+  <p>Ein leeres oder fehlendes <code>RESEND_WEBHOOK_SECRET</code> — der Standard — ergab einen leeren HMAC-Schlüssel,
+  ohne Fehler. Mit dem kann jeder signieren: eine gefälschte Beschwerde sperrte jede Adresse, still und endgültig.
+  Der bestehende Test lief nur deshalb grün, weil er mit dem echten Schlüssel signierte.</p>
+  <span class="label">Behoben</span>
+  <p>Ein leerer Schlüssel lehnt alles ab (401, im Resend-Dashboard sichtbar). Signaturen werden als Bytes verglichen,
+  damit ein Nicht-ASCII-Header nicht wirft. Unerwartet geformte, aber signierte Ereignisse werden quittiert statt
+  mit 500 beantwortet.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">Datenschutz</span><span class="tag">log.py</span></div>
+  <h4>Sentry hätte Schlüssel, Settings und Fan-Adressen mitgeschickt</h4>
+  <p>Mit gesetztem <code>SENTRY_DSN</code> überträgt Sentry die lokalen Variablen jedes Frames. Sein Filter prüft nur
+  Namen auf oberster Ebene — der Resend-Key im Header-Dict, das DB-Passwort in den Settings, die Adresse und der
+  Bestätigungslink des Fans wären durchgerutscht. Jeder anonyme Besucher hätte das auslösen können.</p>
+  <span class="label">Behoben</span>
+  <p><code>include_local_variables=False</code> und <code>max_request_body_size="never"</code>, neben dem bestehenden
+  <code>send_default_pii=False</code>. Ein Test prüft die wirksamen Client-Optionen nach dem echten <code>init</code>.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">Stabilität</span><span class="tag">deps.py</span></div>
+  <h4>„Du bist abgemeldet", bevor es gespeichert war</h4>
+  <p>FastAPI führt den Abbau einer <code>yield</code>-Abhängigkeit standardmäßig <em>nach</em> dem Senden der Antwort aus
+  — und dort committete <code>get_session</code>. Scheiterte der Commit, stand „abgemeldet" schon auf dem Bildschirm,
+  das Mailprogramm (One-Click) versucht es nie wieder, und der Fan bekäme weiter Mails. Dasselbe beim Bestätigen und
+  beim Magic-Link.</p>
+  <span class="label">Behoben — an der einen gemeinsamen Stelle</span>
+  <p><code>DbSession = Annotated[Session, Depends(get_session, scope="function")]</code>: Jede Route committet vor der
+  Antwort. Getestet über <code>dependency_overrides</code> mit einer Session, deren Commit scheitert — erwartet wird 500
+  statt 200.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Stabilität</span><span class="tag">server.py</span></div>
+  <h4>NUL-Bytes, riesige Bodies, Nicht-ASCII-Header: 500er und Speicherdruck</h4>
+  <p>Ein NUL im Pfad erreichte die Datenbank und kam als 500 zurück. Kein Body hatte eine Obergrenze: vier parallele
+  100-MB-POSTs hätten die 512-MB-Instanz auf Render abstürzen lassen.</p>
+  <span class="label">Behoben</span>
+  <p>Pfade mit Steuerzeichen sind ein 404, bevor sie eine Route erreichen; Bodies über 64 KiB bekommen 413. Die
+  Größenbremse sitzt bewusst <em>innen</em> im Middleware-Stapel: Die Funktions-Middlewares lesen den Body in einer
+  eigenen Task, und eine Ablehnung dort käme verpackt in einer <code>ExceptionGroup</code> als 500 an.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Entscheidung</span><span class="tag">subscriptions.py</span></div>
+  <h4>Sperren sind dauerhaft; die App behält einen reinen Sende-Key</h4>
+  <p>Plan §7/§10 wollte eine Bounce-Sperre bei erneuter Bestätigung aufheben. Resend setzt eine hart gebouncte Adresse
+  aber auf eine kontoweite Sperrliste ohne Ablauf — die Bestätigungsmail käme nie an. Die Liste lässt sich nur mit
+  einem Full-Access-Key bearbeiten (live geprüft: der Sende-Key bekommt <code>401 restricted_api_key</code>).</p>
+  <span class="label">Mit dir entschieden</span>
+  <p>Kein Full-Access-Key in der App. Jede Sperre ist dauerhaft; <code>email.suppressed</code> sperrt wie ein Bounce.
+  Entsperren ist ein Betreiberschritt (ARCHITECTURE.md → „The fan area"). Damit entfallen zwei weitere Review-Befunde
+  ganz: die Aufhebung beim bereits bestätigten Fan und der Wettlauf zwischen Aufheben und Sperren.</p>
+  <span class="label">Verworfen</span>
+  <p>Full-Access-Key mit Entsperren höchstens einmal pro Tag: Ein Leck dieses Schlüssels könnte Domains löschen und
+  jede Mail lesen — zu viel Schaden für einen seltenen Sonderfall.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Datenschutz</span><span class="tag">subscriptions.py</span></div>
+  <h4>Timing-Orakel: Gesperrte Adressen antworteten zehnmal schneller</h4>
+  <p>Die Antwort war für alle Adressen gleich — die Antwortzeit nicht. Wer gesperrt oder gedrosselt war, übersprang den
+  Aufruf bei Resend (~10 ms statt ~200 ms). Eine einzige Anfrage verriet, ob jemand eine Beschwerde eingereicht hat.
+  Der Creator-Login hatte dasselbe seit M2.</p>
+  <span class="label">Behoben</span>
+  <p>Bestätigungsmail und Magic-Link gehen als Hintergrund-Task <em>nach</em> der Antwort raus — und erst nach dem
+  Commit. Scheitert der Versand, wird die Bremse gelöst bzw. der Link zurückgezogen. Nebenbei behoben: Ein gescheiterter
+  Magic-Link-Versand sperrte den Creator bisher 15 Minuten aus.</p>
+  <span class="label">Verworfen</span>
+  <p>Eine Warteschlange im Worker: bräuchte eine Tabelle und brächte eine Minute Verzug in eine Mail, auf die der Fan
+  gerade wartet. Der Hintergrund-Task von FastAPI läuft Millisekunden nach der Antwort.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Adressen</span><span class="tag">addresses.py</span></div>
+  <h4>Strenge Adressprüfung mit MX-Abfrage (neue Abhängigkeit <code>email-validator</code>)</h4>
+  <p>Abgelehnt werden Anzeigenamen, Anführungszeichen, IP-Literale, Punkt am Domain-Ende, Nicht-ASCII im lokalen Teil
+  und Längen über RFC 5321. Umlaut-Domains werden als Punycode gespeichert. Eine Domain ohne Mailserver
+  (<code>gmx.dee</code>, Null-MX wie <code>example.com</code>) wird abgewiesen, bevor ihr Bounce den Versand-Ruf aller
+  Creator kostet — live gegen echtes DNS geprüft. Antwortet DNS nicht binnen 3 s, geht die Adresse durch: Unser
+  DNS-Problem darf keinen Fan aussperren.</p>
+  <span class="label">Verworfen</span>
+  <p>Ein eigener RFC-5322-Parser: genau die Neuerfindung, die Plan §3 verbietet. <code>email-validator</code> ist die
+  Bibliothek, auf der auch Pydantics <code>EmailStr</code> aufsetzt.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">Nebenläufigkeit</span><span class="tag">steps.py</span></div>
+  <h4>Cleanup gegen Anmeldung, und periodische Jobs im Minutentakt</h4>
+  <p>Der Cleanup konnte eine Adresse löschen, an der gerade eine Anmeldung arbeitete — die Kaskade nahm das neue Abo mit.
+  Und ein Job, der unerwartet warf (ein Feed, der HTML statt XML liefert), rollte seine Buchhaltung zurück und lief
+  danach jede Minute, mit Traceback.</p>
+  <span class="label">Behoben</span>
+  <p>Der Cleanup sperrt mit <code>SKIP LOCKED</code> und überspringt, was eine Anmeldung hält; Adressen mit
+  Bounce-Sperre ohne Abo löscht er jetzt (Datenminimierung), Beschwerden nie. Der Worker verbucht einen fälligen Lauf
+  <em>vor</em> dem Job in eigener Transaktion. Ein Feed, der kein XML ist, ist ein temporärer Fehler dieses einen
+  Kanals. Neuer Index auf <code>deliveries.subscription_id</code> für die Löschkaskade.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Tests</span></div>
+  <h4>Tests, die grün blieben, obwohl die Regel brach</h4>
+  <p>Mutationsläufe des Reviews überlebten: ein fehlender Filter auf der „Dabei!"-Seite, eine verlorene Zeilensperre,
+  ein zu langer Cleanup-Takt. Jede dieser Lücken hat jetzt einen Test, den ich gegen die Mutante habe scheitern sehen.
+  Dabei aufgefallen: Mein erster Nebenläufigkeitstest bestand auch <em>ohne</em> Sperre (bei einer neuen Adresse wartet
+  schon das <code>INSERT</code>), und ein Log-Test prüfte über <code>capsys</code> gar nichts. Beide sind ersetzt.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">Code-Style</span></div>
+  <h4>Aufgeräumt</h4>
+  <ul>
+    <li>Die Abo-Regeln aus <code>fan.py</code> nach <code>app/subscriptions.py</code>; die Route spricht nur noch HTTP.</li>
+    <li>Adress-Normalisierung (dreifach kopiert) nach <code>app/addresses.py</code>.</li>
+    <li>Mail-Betreff einmal im Composer statt zusätzlich im Template (teils mit anderem Text).</li>
+    <li>Kopf und Fuß der Fan-Seiten als Partials; HTMX-Fragmente über <code>render_partial</code>.</li>
+    <li>Alle Log-Events als Konstanten in <code>app/log.py</code>, auch die zwölf älteren String-Literale aus M1–M4.</li>
+    <li>Signier-Hilfe für Webhook-Tests einmal in <code>tests/fakes.py</code>.</li>
+  </ul>
 </div>
 
 <h2 id="abweichungen">3. Abweichungen vom Plan</h2>
@@ -672,6 +818,9 @@ sondern Verhalten.</p>
   Prüfsumme von jsDelivr verifiziert. Ohne JavaScript liefert dieselbe Route die ganze Seite. Bekannte Grenze: Die
   429-Antwort des Rate-Limiters ist JSON, und htmx 2 tauscht bei 4xx nichts aus — ein gedrosselter Fan sieht
   nach dem Klick also keine Reaktion. Bei 20 Anfragen pro Minute und IP trifft das kaum einen Menschen.</p>
+  <span class="label">Nachtrag 18.09. (Code-Review)</span>
+  <p>Behoben statt hingenommen: Das 429 ist jetzt eine Seite bzw. ein Fragment, und die Anmeldeseite sagt htmx per
+  <code>htmx-config</code>, ein 429 einzusetzen. Ohne JavaScript sah man vorher rohes JSON.</p>
 </div>
 
 <h2 id="kompromisse">4. Kompromisse</h2>
@@ -839,4 +988,29 @@ jeweils genannten Standard weiter.</p>
   <p>Eine ungültige Signatur bekommt 401. Resend zeigt die Fehlkonfiguration dann im Dashboard an und wiederholt,
   bis sie behoben ist. Alles gültig Signierte bekommt 200, auch ignorierte Ereignisse und ein unlesbarer Body
   (eine Wiederholung würde ihn nicht lesbarer machen). Plan §10 und §13 sind angepasst.</p>
+</div>
+
+<div class="entry">
+  <h4>11. Entsperren ist Handarbeit — entschieden: ja, für den MVP</h4>
+  <p>Mit dauerhaften Sperren braucht ein Fan, dessen Postfach wieder funktioniert, den Betreiber: Adresse in Resend von
+  der Sperrliste nehmen, dann eine SQL-Zeile (ARCHITECTURE.md). Das trifft nur hart gebouncte Adressen, die später
+  wieder existieren — selten. Ein Runbook-Eintrag dafür steht in M7.</p>
+  <span class="label">Entschieden am 18.09.2026</span>
+  <p>Für den MVP in Ordnung, soll später aber als Feature besser werden. Steht mit Auslöser in
+  <code>docs/backlog.md</code> („Self-service re-verification for blocked fans").</p>
+</div>
+
+<div class="entry open">
+  <h4>12. Getrennte Resend-Keys pro Umgebung, der Produktions-Key auf die Domain beschränkt — einverstanden?</h4>
+  <p>Heute gibt es einen Resend-Key (dein „Sending access"-Key in der lokalen <code>.env</code>). Er darf von jeder
+  Domain deines Kontos senden. Das ist für die Entwicklung richtig.</p>
+  <p>Für den Betrieb auf Render (M9) schlage ich zwei Dinge vor, beide im Resend-Dashboard, ohne Code:</p>
+  <ul>
+    <li><strong>Ein eigener Key für Render</strong>, getrennt vom lokalen. Gerät einer in falsche Hände, sperrst du genau
+    diesen einen, und der andere läuft weiter.</li>
+    <li><strong>Den Render-Key auf die eigene Domain beschränken</strong> (Resend bietet das beim Anlegen an). Ein
+    geleakter Key kann dann nicht im Namen einer anderen Domain deines Kontos senden.</li>
+  </ul>
+  <span class="label">Frage an dich</span>
+  <p>Sollen wir das in M9 so machen? Bis dahin musst du nichts tun; ich nehme es in die M9-Checkliste auf.</p>
 </div>

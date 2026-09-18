@@ -581,6 +581,8 @@ Chat-Assistent (RAG-basiert, siehe Zukunftsliste), ggf. Diskussionsbereich, mehr
 
 Diese Liste ist zugleich die Quelle für die Feature-Vorschau auf der Website (5.6). Was hier steht, wird dort in Creator-Sprache gezeigt; was hier gestrichen wird, verschwindet dort.
 
+Hier stehen die *Produkt*-Ideen. Technische Weiterentwicklungen, die beim Bauen bewusst aufgeschoben wurden — jeweils mit dem Auslöser, ab dem sie sich lohnen —, sammelt `docs/backlog.md`.
+
 ### Persönlicher Chat-Assistent über den Backkatalog
 **Explizit auf die Zukunftsliste verschoben — nicht Teil des MVP.** Grund: Das ist kein einfaches Zusatzfeature, sondern eine eigene technische Baustelle:
 - Braucht einen durchsuchbaren Index (Embeddings/Vektordatenbank, im Stack: `pgvector`) über den gesamten Backkatalog eines Kanals, nicht nur das letzte Video.
