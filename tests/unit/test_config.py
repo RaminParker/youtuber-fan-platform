@@ -1,5 +1,7 @@
 """The configuration must load, let the environment win, and refuse nonsense."""
 
+from datetime import date
+
 import pytest
 from pydantic import ValidationError
 
@@ -118,6 +120,7 @@ class TestStartUpValidation:
         # Booking cost 0 would silently bypass the daily cap.
         with pytest.raises(ValidationError, match="no price"):
             LLMSettings(
+                usage_dashboard="https://console.anthropic.com/settings/usage",
                 model_summary="anthropic/claude-sonnet-4-5",
                 model_sentiment="openai/gpt-nonexistent",
                 max_output_tokens=4000,
@@ -126,7 +129,9 @@ class TestStartUpValidation:
                 summary_prompt_version="v1",
                 sentiment_prompt_version="v1",
                 prices_per_million_tokens={
-                    "anthropic/claude-sonnet-4-5": ModelPrice(input=3.0, output=15.0)
+                    "anthropic/claude-sonnet-4-5": ModelPrice(
+                        input=3.0, output=15.0, source="test", checked_on=date(2026, 9, 20)
+                    )
                 },
             )
 

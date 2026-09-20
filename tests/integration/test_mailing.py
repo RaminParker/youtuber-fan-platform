@@ -6,13 +6,15 @@ under test — exactly once — only exists across those commits.
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text, update
+from sqlalchemy.exc import OperationalError
 
-from app import log, worker
-from app.analysis.schemas import Summary
+from app import worker
+from app.analysis.schemas import Sentiment, Summary
 from app.config import get_settings
 from app.db.engine import get_engine, session_scope
 from app.db.models import (
@@ -32,6 +34,7 @@ from app.db.models import (
     Subscriber,
     Subscription,
     SubscriptionStatus,
+    Transcript,
 )
 from app.delivery import mailing as mailings
 from app.delivery.email_client import EmailError, EmailTemporaryError, QuotaExhausted
@@ -143,13 +146,6 @@ def add_fan(creator_id: int, address: str, status=SubscriptionStatus.CONFIRMED, 
         return row.id
 
 
-@pytest.fixture
-def logs(caplog):
-    """Route structlog through stdlib logging, where ``caplog`` listens."""
-    log.configure_logging(get_settings())
-    return caplog
-
-
 def logged(caplog, event: str) -> bool:
     return any(event in str(record.msg) for record in caplog.records)
 
@@ -199,7 +195,7 @@ class TestTheWholeWay:
         assert preview.text.startswith(
             "Diese Mail geht am Dienstag, 22. September, um 18:00 Uhr an 1 Abonnent."
         )
-        assert preview.idempotency_key == f"preview/{world['mailing']}/stop-token-1"
+        assert preview.idempotency_key.startswith(f"preview/{world['mailing']}/stop-token-1/")
         assert "List-Unsubscribe" not in preview.headers
         assert "Wie die Community" in preview.html or "COMMUNITY" in preview.text
 
@@ -514,6 +510,10 @@ class TestFailure:
         worker.run_tick(T + timedelta(hours=1))
 
         assert mailing_row(world["mailing"]).status == MailingStatus.FAILED
+        # The send had begun. Even here — the provider refused the batch — the
+        # notice stays pessimistic: a crash between an accepted batch and the
+        # commit that records it looks exactly the same from the outside, and
+        # "niemand hat sie bekommen" is a claim we cannot take back.
         notices = [m for m in email.sent if m.subject == NOTICES[NoticeKind.SEND_FAILED].subject]
         assert len(notices) == 1
         assert notices[0].to == CREATOR_MAIL
@@ -673,7 +673,9 @@ class TestThePostponeLink:
         worker.run_tick(new_t - timedelta(hours=2))
         assert len(llm.calls) == 1  # the sentiment is fetched again
         worker.run_tick(new_t - timedelta(hours=1))
-        assert email.last.idempotency_key == f"preview/{world['mailing']}/{row.stop_token}"
+        assert email.last.idempotency_key.startswith(
+            f"preview/{world['mailing']}/{row.stop_token}/"
+        )
         worker.run_tick(new_t)
         assert [mail.to for mail in fan_mails(email)] == ["fan@example.org"]
 
@@ -745,7 +747,9 @@ class TestTheDailyRecheck:
         assert appearance_status() == AppearanceStatus.ANALYZED
 
     def test_an_open_mailing_of_a_gone_video_is_cancelled(self, world):
-        install(youtube=FakeYouTubeConnector(items=[]))
+        # The answer knows other videos, just not ours: that is what deleted
+        # looks like. An answer that knows none at all is not believed.
+        install(youtube=FakeYouTubeConnector(items=[content_item("otherrrrrrr")]))
 
         run_cleanup()
 
@@ -833,3 +837,357 @@ class TestARejectedKeyNeverCostsAVideo:
 
         assert mailing_row(world["mailing"]).status == MailingStatus.SENTIMENT_READY
         assert any("ANTHROPIC_API_KEY" in line for line in operator_logs(logs))
+
+
+NUL = "Ein \x00 Byte, das Postgres ablehnt"
+
+
+class TestAFailureInsideAStepNeverLosesWhatWasPaidFor:
+    """A caught database error leaves the transaction aborted — and the commit
+    that follows reports success while discarding every write. Anything a step
+    has already paid for must be committed before it risks another statement.
+    """
+
+    def add_transcribed_video(self) -> int:
+        with session_scope() as session:
+            appearance = Appearance(
+                source_id=session.scalar(select(Source.id)),
+                external_id="ppppppppppp",
+                title="Backfill-Video",
+                url="https://www.youtube.com/watch?v=ppppppppppp",
+                published_at=PUBLISHED - timedelta(days=200),
+                duration_seconds=900,
+                status=AppearanceStatus.TRANSCRIBED,
+                is_backfill=True,
+                view_token="poison-view-token",
+            )
+            session.add(appearance)
+            session.flush()
+            session.add(
+                Transcript(
+                    appearance_id=appearance.id,
+                    origin="youtube_unofficial",
+                    language="de",
+                    is_generated=True,
+                    fetched_at=T,
+                    segments=[{"start": 0.0, "duration": 3.0, "text": "Hallo."}],
+                )
+            )
+            return appearance.id
+
+    def poisoned_llm(self) -> fakes.FakeLLMGateway:
+        """Answers with a summary, then with a sentiment Postgres will refuse."""
+        sentiment = Sentiment(
+            overall=NUL, agreed=[], disagreed=[], questions=[], comment_count_used=1
+        )
+        return fakes.FakeLLMGateway(results=[_default_for(Summary), sentiment])
+
+    def test_the_summary_survives_a_sentiment_the_database_refuses(self, world):
+        appearance_id = self.add_transcribed_video()
+        install(llm=self.poisoned_llm(), youtube=FakeYouTubeConnector(comments=COMMENTS))
+
+        worker.run_tick(T)
+
+        with session_scope() as session:
+            stored = session.get(Appearance, appearance_id)
+            assert stored.status == AppearanceStatus.ANALYZED
+            assert session.scalar(
+                select(Analysis).where(
+                    Analysis.appearance_id == appearance_id,
+                    Analysis.kind == AnalysisKind.SUMMARY,
+                )
+            )
+
+    def test_a_mailing_is_not_failed_by_a_sentiment_the_database_refuses(self, world):
+        install(
+            llm=self.poisoned_llm(),
+            youtube=FakeYouTubeConnector(items=[content_item(VIDEO)], comments=COMMENTS),
+        )
+
+        worker.run_tick(SENTIMENT_AT)
+
+        # The comment box is a bonus; the mail goes on without it.
+        assert mailing_row(world["mailing"]).status == MailingStatus.SENTIMENT_READY
+
+
+class TestTheSendCommitsWhatItFinished:
+    """The lock is held for the whole send; whatever it decided must survive it."""
+
+    def test_sent_is_committed_before_the_lock_is_released(self, world):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+
+        with session_scope() as session:
+            steps.send(session, world["mailing"], T)
+            session.rollback()  # the caller's transaction is lost
+
+        assert mailing_row(world["mailing"]).status == MailingStatus.SENT
+        assert len(fan_mails(email)) == 1
+
+    def test_an_unlock_that_fails_does_not_undo_a_finished_send(self, world, logs, monkeypatch):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+        engine = get_engine()
+
+        class UnlockRefuses:
+            """A connection that sends, but cannot give the lock back."""
+
+            def __init__(self, real):
+                self._real = real
+
+            def execute(self, statement, *args, **kwargs):
+                if "unlock" in str(statement):
+                    raise OperationalError("server closed the connection", None, Exception())
+                return self._real.execute(statement, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        monkeypatch.setattr(
+            mailings,
+            "get_engine",
+            lambda: SimpleNamespace(connect=lambda: UnlockRefuses(engine.connect())),
+        )
+
+        worker.run_tick(T)
+
+        assert mailing_row(world["mailing"]).status == MailingStatus.SENT
+        assert len(fan_mails(email)) == 1
+        assert not [m for m in email.sent if m.tags.get("kind") == "notice"]
+        assert logged(logs, "mailing.unlock_failed")
+
+
+class TestTheDailyJobProtectsTheDeletions:
+    """Retention protects privacy; a video platform must never hold it up."""
+
+    def expired_sign_up(self, world) -> int:
+        pending = add_fan(world["creator"], "old@example.org", status=SubscriptionStatus.PENDING)
+        with session_scope() as session:
+            session.execute(
+                update(Subscription)
+                .where(Subscription.id == pending)
+                .values(confirm_expires_at=T - timedelta(days=1))
+            )
+        return pending
+
+    def test_a_re_check_that_fails_midway_keeps_the_deletions(self, world):
+        pending = self.expired_sign_up(world)
+
+        class GoneThenBroken(FakeYouTubeConnector):
+            def item_details(self, external_ids):
+                return []  # every video looks gone …
+
+        install(youtube=GoneThenBroken())
+        with session_scope() as session:
+            try:
+                steps.cleanup(session, T, get_settings())
+            finally:
+                session.rollback()  # … and the rest of the job is lost
+
+        with session_scope() as session:
+            assert session.get(Subscription, pending) is None
+
+    def test_an_answer_that_knows_no_video_at_all_is_not_taken_as_proof(self, world, logs):
+        # One odd 200 from the API must not retire every summary page there is.
+        with session_scope() as session:
+            source_id = session.scalar(select(Source.id))
+            for number in range(steps.TOO_MANY_TO_LOSE_AT_ONCE):
+                session.add(
+                    Appearance(
+                        source_id=source_id,
+                        external_id=f"many{number:07d}",
+                        title=f"Video {number}",
+                        url="https://www.youtube.com/watch?v=x",
+                        published_at=PUBLISHED,
+                        status=AppearanceStatus.ANALYZED,
+                        view_token=f"token-{number}",
+                    )
+                )
+        install(youtube=FakeYouTubeConnector(items=[]))
+
+        run_cleanup()
+
+        assert appearance_status() == AppearanceStatus.ANALYZED
+        assert mailing_row(world["mailing"]).status == MailingStatus.SCHEDULED
+        assert logged(logs, "cleanup.recheck_failed")
+
+    def test_a_quota_that_ran_out_is_reported_as_the_operators(self, world, logs):
+        install(youtube=FakeYouTubeConnector(fail_with=YOUTUBE_KEY))
+
+        run_cleanup()
+
+        assert any("YOUTUBE_API_KEY" in line for line in operator_logs(logs))
+
+
+class TestALongSendDoesNotGiveUpOnItself:
+    def test_a_batch_that_went_through_clears_the_failures_before_it(self, world):
+        for number in range(150):
+            add_fan(world["creator"], f"fan{number:03d}@example.org")
+        email, _ = run_to_preview(world)
+        email.batch_fails_with = EmailTemporaryError("provider hiccup")
+        worker.run_tick(T)  # the send has begun and stumbled once
+        assert mailing_row(world["mailing"]).status == MailingStatus.SENDING
+
+        # Nine hiccups have happened over this long list by now; the tenth
+        # would end the mailing with most of the list unsent.
+        set_mailing(world["mailing"], attempts=MAX_ATTEMPTS - 1)
+        email.batches_before_failure = 1  # one batch goes through, then it fails again
+        worker.run_tick(T + timedelta(hours=1))
+
+        row = mailing_row(world["mailing"])
+        assert row.status == MailingStatus.SENDING  # not failed: a batch got through
+        assert row.attempts == 1  # progress cleared what came before it
+
+        email.batch_fails_with = None
+        worker.run_tick(row.next_attempt_at)
+
+        assert mailing_row(world["mailing"]).status == MailingStatus.SENT
+        assert len(fan_mails(email)) == 150
+
+
+class TestABlockDuringTheSendIsHonoured:
+    """A bounce or a spam complaint mid-send stops the remaining batches —
+    the provider would drop the mail anyway and the complaint costs every
+    creator on the platform (owner decision 2026-09-20)."""
+
+    def test_a_fan_blocked_mid_send_gets_no_further_batch(self, world):
+        staying = add_fan(world["creator"], "fan@example.org")
+        blocked = add_fan(world["creator"], "complains@example.org")
+        email, _ = run_to_preview(world)
+        email.batch_fails_with = EmailTemporaryError("provider down")
+
+        worker.run_tick(T)  # snapshot taken, nothing delivered yet
+        with session_scope() as session:
+            session.execute(
+                update(Subscriber)
+                .where(Subscriber.email == "complains@example.org")
+                .values(blocked_at=T, blocked_reason="complaint")
+            )
+        email.batch_fails_with = None
+
+        worker.run_tick(T + timedelta(hours=1))
+
+        row = mailing_row(world["mailing"])
+        assert row.status == MailingStatus.SENT
+        assert [mail.to for mail in fan_mails(email)] == ["fan@example.org"]
+        assert row.recipient_count == 1  # counts what was sent, not what was planned
+        sent = {d.subscription_id: d.sent_at for d in deliveries(world["mailing"])}
+        assert sent[staying] is not None
+        assert sent[blocked] is None  # the ledger says: never sent
+
+
+class TestThePreviewSurvivesARetry:
+    """Its idempotency key must never meet a changed body: what the provider
+    does with that is undocumented (plan §18), and this design never asks."""
+
+    def test_the_send_time_is_written_before_the_preview_goes_out(self, world):
+        install(email=FakeEmailClient(fail_with=EmailTemporaryError("timeout")))
+
+        worker.run_tick(SENTIMENT_AT)
+        worker.run_tick(PREVIEW_AT + timedelta(minutes=1))  # a late tick pushes the send
+
+        row = mailing_row(world["mailing"])
+        assert row.status == MailingStatus.SENTIMENT_READY  # the preview failed
+        assert row.send_at == PREVIEW_AT + timedelta(minutes=1) + timedelta(hours=1)
+
+    def test_the_same_preview_twice_is_one_mail_for_the_provider(self, world):
+        install()
+        worker.run_tick(SENTIMENT_AT)
+        attempts = []
+
+        def record_and_fail(mail):
+            attempts.append(mail)
+            if len(attempts) == 1:
+                raise EmailTemporaryError("the answer never arrived")
+
+        install(email=FakeEmailClient(on_send=record_and_fail))
+        # The same clock: nothing about the mail has changed between the two.
+        worker.run_tick(PREVIEW_AT)
+        set_mailing(world["mailing"], next_attempt_at=None)
+        worker.run_tick(PREVIEW_AT)
+
+        first, second = attempts
+        assert first.html == second.html
+        assert first.idempotency_key == second.idempotency_key
+
+    def test_a_later_attempt_that_says_something_else_says_it_under_its_own_key(self, world):
+        # A late retry pushes the send time, so the mail announces a new one.
+        # That is a different mail, and it must not travel under the old key.
+        install()
+        worker.run_tick(SENTIMENT_AT)
+        attempts = []
+
+        def record_and_fail(mail):
+            attempts.append(mail)
+            if len(attempts) == 1:
+                raise EmailTemporaryError("the answer never arrived")
+
+        install(email=FakeEmailClient(on_send=record_and_fail))
+        worker.run_tick(PREVIEW_AT)
+        worker.run_tick(mailing_row(world["mailing"]).next_attempt_at)
+
+        first, second = attempts
+        assert first.html != second.html
+        assert first.idempotency_key != second.idempotency_key
+
+    def test_the_key_carries_the_mailing_its_token_and_its_content(self, world):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+
+        key = email.last.idempotency_key
+        mailing, token = world["mailing"], mailing_row(world["mailing"]).stop_token
+
+        assert key.startswith(f"preview/{mailing}/{token}/")
+        assert len(key.rsplit("/", 1)[1]) == 12
+
+
+class TestTheFailureNoticeTellsTheTruth:
+    def test_a_mailing_that_never_started_sending_says_nothing_went_out(self, world):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+        # YouTube is down at send time, so the send never begins.
+        install(email=email, youtube=FakeYouTubeConnector(fail_with=TemporaryError("down")))
+        set_mailing(world["mailing"], attempts=MAX_ATTEMPTS - 1)
+
+        worker.run_tick(T)
+
+        assert mailing_row(world["mailing"]).status == MailingStatus.FAILED
+        assert deliveries(world["mailing"]) == []
+        [notice] = [m for m in email.sent if m.tags.get("kind") == "notice"]
+        assert notice.subject == NOTICES[NoticeKind.NOT_SENT].subject
+
+
+class TestAMailingDoesNotWaitForever:
+    """Parking is right for a video; a mailing has a promise attached to it.
+
+    The creator was shown a preview naming a time. If we cannot send around
+    that time, they have to hear about it instead of a silence that lasts
+    until somebody notices the log.
+    """
+
+    def test_a_key_problem_at_send_time_ends_the_mailing_after_the_grace_period(self, world):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+        install(email=email, youtube=FakeYouTubeConnector(fail_with=YOUTUBE_KEY))
+
+        worker.run_tick(T)
+        assert mailing_row(world["mailing"]).status == MailingStatus.PREVIEW_SENT  # parked
+
+        worker.run_tick(T + worker.GIVE_UP_ON_A_MAILING_AFTER + timedelta(minutes=1))
+
+        assert mailing_row(world["mailing"]).status == MailingStatus.FAILED
+        assert [m.subject for m in email.sent if m.tags.get("kind") == "notice"] == [
+            NOTICES[NoticeKind.NOT_SENT].subject
+        ]
+
+    def test_inside_the_grace_period_it_keeps_trying(self, world):
+        add_fan(world["creator"], "fan@example.org")
+        email, _ = run_to_preview(world)
+        install(email=email, youtube=FakeYouTubeConnector(fail_with=YOUTUBE_KEY))
+
+        worker.run_tick(T)
+        worker.run_tick(T + timedelta(hours=1))
+
+        row = mailing_row(world["mailing"])
+        assert row.status == MailingStatus.PREVIEW_SENT
+        assert row.attempts == 0  # a key problem still costs no attempt

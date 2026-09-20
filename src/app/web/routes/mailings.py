@@ -46,9 +46,7 @@ def handle_stop_page(
 
 
 @router.post("/m/{token}/stoppen", response_class=HTMLResponse)
-def handle_stop(
-    token: str, session: DbSession, settings: Settings = Depends(get_settings)
-) -> HTMLResponse:
+def handle_stop(token: str, session: DbSession) -> HTMLResponse:
     """Stop the mail — or say truthfully why that is no longer possible."""
     found = mailings.find_by_token(session, token)
     if found is None or not mailings.stop(session, token, datetime.now(UTC)):

@@ -9,6 +9,7 @@ import pytest
 
 from app.analysis.llm import BifrostGateway, LLMError
 from app.analysis.schemas import Sentiment
+from app.config import get_settings
 from app.delivery.email_client import EmailError, QuotaExhausted, ResendClient
 from app.delivery.render import OutgoingEmail
 from app.errors import NeedsOperator, TemporaryError
@@ -153,6 +154,23 @@ class TestTheGateway:
         assert "config/bifrost.json" in str(caught.value)
         assert caught.value.problem.startswith("model ")
 
+    def test_a_404_that_is_not_about_a_model_names_the_address_instead(self):
+        # A gateway at the wrong URL answers 404 too; telling the operator to
+        # change the model would send them looking in the wrong file.
+        with pytest.raises(NeedsOperator) as caught:
+            ask(gateway(404, {"error": {"message": "404 page not found"}}))
+
+        assert "LLM_GATEWAY_URL" in str(caught.value)
+        assert "settings.toml" not in str(caught.value)
+
+    def test_a_refused_key_is_recognised_by_its_status_not_its_wording(self):
+        # Providers reword their messages; 401 and 403 mean the same thing
+        # whatever they say.
+        with pytest.raises(NeedsOperator) as caught:
+            ask(gateway(403, {"error": {"message": "insufficient funds for this organisation"}}))
+
+        assert "ANTHROPIC_API_KEY" in str(caught.value)
+
     def test_any_other_refusal_stays_a_plain_error(self):
         with pytest.raises(LLMError):
             ask(gateway(400, {"error": {"message": "max_tokens: must be positive"}}))
@@ -188,7 +206,7 @@ class TestOneModelNameInTwoFiles:
     def test_every_configured_model_is_allowed_by_the_gateway(self):
         import json
 
-        from app.config import REPO_ROOT, get_settings
+        from app.config import REPO_ROOT
 
         llm = get_settings().llm
         gateway = json.loads((REPO_ROOT / "config" / "bifrost.json").read_text())
@@ -211,3 +229,31 @@ class TestOneModelNameInTwoFiles:
         configured = {llm.model_summary, llm.model_sentiment}
         assert configured <= allowed, "add the model to allowed_models in config/bifrost.json"
         assert configured <= served, "add the model to the key's models in config/bifrost.json"
+
+
+class TestTheOperatorAlwaysHearsAboutIt:
+    """Every path that swallows a send failure still reports a key or a plan.
+
+    The web process swallows them by design — a sign-up must answer the same
+    way whatever happened — so without this line a revoked key is invisible
+    exactly where fans are lost.
+    """
+
+    def test_a_key_problem_is_logged_as_the_operators(self, logs):
+        from app import log
+
+        reported = log.report_operator_action(
+            NeedsOperator("Resend", "API key rejected", "check RESEND_API_KEY"), creator_id=7
+        )
+
+        assert reported
+        assert [
+            record
+            for record in logs.records
+            if "operator.action_needed" in str(record.msg) and record.levelname == "ERROR"
+        ]
+
+    def test_anything_else_is_left_to_its_own_handler(self):
+        from app import log
+
+        assert not log.report_operator_action(RuntimeError("something else"))

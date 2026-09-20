@@ -24,6 +24,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     Numeric,
@@ -31,6 +32,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -164,6 +166,7 @@ class NoticeKind(enum.StrEnum):
     OAUTH_RECONSENT = "oauth_reconsent"
     FAILED = "failed"
     PREVIEW_FAILED = "preview_failed"
+    NOT_SENT = "not_sent"
     SEND_FAILED = "send_failed"
 
 
@@ -434,7 +437,19 @@ class Delivery(Base):
     """
 
     __tablename__ = "deliveries"
-    __table_args__ = (UniqueConstraint("mailing_id", "subscription_id"),)
+    __table_args__ = (
+        UniqueConstraint("mailing_id", "subscription_id"),
+        # The batch loop asks this question once per batch, for the whole life
+        # of a send: the next hundred rows of this mailing that are still
+        # unsent. Without the partial index it reads every delivery ever made
+        # to that mailing, again, for every batch.
+        Index(
+            "ix_deliveries_pending",
+            "mailing_id",
+            "id",
+            postgresql_where=text("sent_at IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     mailing_id: Mapped[int] = mapped_column(
@@ -469,7 +484,18 @@ class LLMCall(Base):
     prompt_version: Mapped[str] = mapped_column(String(16), nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Part of tokens_in that came from, or went into, the provider's cache.
+    tokens_cached: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    tokens_cache_write: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     cost_cents: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, server_default="0")
+    # The price this row was booked at, and where it came from. Kept per row so
+    # that a line written before a price change still says what it meant; a
+    # `price_source` of "unknown" marks a call nobody had a price for.
+    price_input: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, server_default="0")
+    price_output: Mapped[Decimal] = mapped_column(
+        Numeric(12, 6), nullable=False, server_default="0"
+    )
+    price_source: Mapped[str] = mapped_column(String(128), nullable=False, server_default="unknown")
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = created_at_column()

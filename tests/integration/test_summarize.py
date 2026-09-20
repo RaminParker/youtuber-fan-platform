@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from app.analysis.llm import price_of
 from app.analysis.summarize import TranscriptTooLong
 from app.config import get_settings
 from app.db.engine import session_scope
@@ -108,7 +109,7 @@ class TestTheSummary:
 
         analysis = session.scalar(select(Analysis).where(Analysis.kind == AnalysisKind.SUMMARY))
         assert analysis.prompt_version == "v1"
-        assert analysis.model == "anthropic/claude-sonnet-4-5"
+        assert analysis.model == get_settings().llm.model_summary
         assert analysis.content["headline"]
         assert appearance.status == AppearanceStatus.ANALYZED
 
@@ -223,7 +224,13 @@ class TestTheLedger:
         assert call.purpose == "summary"
         assert call.tokens_in == 5000
         assert call.ok is True
-        assert call.cost_cents == Decimal("2.7000")
+        # Computed from the configured price, not written down here: a model
+        # switch changes the number, and a test that has to be edited for it
+        # teaches people to edit tests.
+        settings = get_settings()
+        expected = price_of(settings.llm.model_summary, settings).cost_cents(5_000, 800)
+        assert call.cost_cents == expected
+        assert call.price_source == settings.llm.model_summary
 
     def test_a_failed_call_is_booked_too(self, session, appearance, fake_services):
         # Otherwise a retry loop would spend money the ledger never sees.

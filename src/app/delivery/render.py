@@ -221,6 +221,15 @@ NOTICES = {
         ),
         what_now="Du musst nichts tun — wir melden uns, wenn wir mehr wissen.",
     ),
+    NoticeKind.NOT_SENT: Notice(
+        subject="Eine Zusammenfassung ist nicht rausgegangen",
+        headline="Die Mail hat deine Abonnenten nicht erreicht",
+        explanation=(
+            "Beim Versand ging etwas schief, und zwar bevor eine einzige Mail raus war. "
+            "Niemand aus deiner Liste hat etwas bekommen."
+        ),
+        what_now="Du musst nichts tun — wir melden uns, wenn wir mehr wissen.",
+    ),
     NoticeKind.SEND_FAILED: Notice(
         subject="Der Versand einer Zusammenfassung ist hängen geblieben",
         headline="Der Versand an deine Abonnenten ist nicht fertig geworden",

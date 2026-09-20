@@ -24,9 +24,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import log
+from app.analysis.llm import stale_prices
 from app.config import Settings, get_settings, missing_secrets
 from app.db.engine import session_scope
 from app.db.models import (
+    MAILING_STOPPABLE,
     Appearance,
     AppearanceStatus,
     Creator,
@@ -54,6 +56,17 @@ ERROR_LENGTH = 2000
 #: How often a row blocked by a key or a plan asks again. Short, so a fixed key
 #: is picked up within the hour; every ask logs at ERROR, so it stays loud.
 WAIT_FOR_THE_OPERATOR = timedelta(hours=1)
+
+#: How long a mailing blocked by a key or a plan may wait past its send time
+#: before it is given up on. A video can wait forever — nobody was promised
+#: anything. A mailing cannot: its creator has seen a preview naming a time,
+#: and a summary days late is worse than one that never comes with a word of
+#: explanation.
+#:
+#: Deliberately not applied to ordinary temporary failures: those already have
+#: the retry ladder, and a send that keeps delivering batches is making
+#: progress — ending it mid-list would strand the rest for good.
+GIVE_UP_ON_A_MAILING_AFTER = timedelta(hours=12)
 
 logger = log.get_logger(__name__)
 
@@ -140,6 +153,7 @@ def record_outcome(appearance_id: int, now: datetime, error: Exception) -> None:
     the retry ladder stayed silent while the notice text — "wir haben es
     mehrfach versucht" — was written for exactly that path.
     """
+    notice = None
     with session_scope() as session:
         appearance = session.get(Appearance, appearance_id)
         if appearance is None:
@@ -170,7 +184,10 @@ def record_outcome(appearance_id: int, now: datetime, error: Exception) -> None:
         else:
             logger.exception(log.ITEM_FAILED)
 
-        _give_up(session, appearance, error)
+        notice = _give_up(session, appearance, error)
+    if notice is not None:
+        creator, kind, context = notice
+        steps.notify_creator(creator, kind, **context)
 
 
 def park_for_the_operator(row: Appearance | Mailing, error: NeedsOperator, now: datetime) -> None:
@@ -182,29 +199,28 @@ def park_for_the_operator(row: Appearance | Mailing, error: NeedsOperator, now: 
     """
     row.next_attempt_at = now + WAIT_FOR_THE_OPERATOR
     row.last_error = str(error)[:ERROR_LENGTH]
-    logger.error(
-        log.OPERATOR_ACTION_NEEDED,
-        service=error.service,
-        problem=error.problem,
-        fix=error.fix,
-        retry_at=row.next_attempt_at,
-    )
+    log.report_operator_action(error, retry_at=row.next_attempt_at)
 
 
-def _give_up(session: Session, appearance: Appearance, error: Exception) -> None:
-    """End the row and tell the creator. The one place ``failed`` is written."""
+def _give_up(session: Session, appearance: Appearance, error: Exception):
+    """End the row and return the notice its creator gets after the commit.
+
+    Returned rather than sent: a notice that goes out before the ``failed``
+    state is committed would tell the creator about a video the worker then
+    happily retries.
+    """
     steps.mark_failed(appearance)
     logger.error(log.ITEM_FAILED, attempts=appearance.attempts, error=str(error))
 
     source = session.get(Source, appearance.source_id)
     creator = session.get(Creator, source.creator_id) if source else None
-    if creator is not None:
-        steps.notify_creator(
-            creator,
-            NoticeKind.FAILED,
-            video_title=appearance.title,
-            appearance_id=appearance.id,
-        )
+    if creator is None:
+        return None
+    return (
+        creator,
+        NoticeKind.FAILED,
+        {"video_title": appearance.title, "appearance_id": appearance.id},
+    )
 
 
 def run_due_steps(now: datetime) -> int:
@@ -229,13 +245,9 @@ MAILING_STEPS: dict[str, Callable[[Session, int, datetime], None]] = {
     SEND: steps.send,
 }
 
-#: States a mailing can still move on from.
-MAILING_OPEN = (
-    MailingStatus.SCHEDULED,
-    MailingStatus.SENTIMENT_READY,
-    MailingStatus.PREVIEW_SENT,
-    MailingStatus.SENDING,
-)
+#: States a mailing can still move on from: everything the creator's links can
+#: still change, plus the send once it has begun.
+MAILING_OPEN = (*sorted(MAILING_STOPPABLE), MailingStatus.SENDING)
 
 
 def due_mailings(session: Session, now: datetime, settings: Settings) -> list[tuple[int, str]]:
@@ -289,7 +301,7 @@ def record_mailing_outcome(mailing_id: int, now: datetime, error: Exception) -> 
         mailing = session.get(Mailing, mailing_id)
         if mailing is None or mailing.status not in MAILING_OPEN:
             return
-        if isinstance(error, NeedsOperator):
+        if isinstance(error, NeedsOperator) and not _past_saving(mailing, now):
             park_for_the_operator(mailing, error, now)
             return
         mailing.last_error = f"{type(error).__name__}: {error}"[:ERROR_LENGTH]
@@ -309,20 +321,47 @@ def record_mailing_outcome(mailing_id: int, now: datetime, error: Exception) -> 
 
         status = mailing.status
         if mailings.fail(session, mailing_id, status):
-            notice = _failure_notice(session, mailing, status)
+            notice = _failure_notice(session, mailing)
     if notice is not None:
         creator, kind, context = notice
         steps.notify_creator(creator, kind, **context)
 
 
-def _failure_notice(session: Session, mailing: Mailing, status: str):
-    """Say what a failed mailing means for the fans: nothing went out, or maybe some did."""
+def _past_saving(mailing: Mailing, now: datetime) -> bool:
+    """Whether a mailing has waited so long past its send time that it is over."""
+    return now > mailing.send_at + GIVE_UP_ON_A_MAILING_AFTER
+
+
+def _failure_notice(session: Session, mailing: Mailing):
+    """Say what a failed mailing means for the fans: nothing went out, or some did.
+
+    The ledger decides, not the status: a mailing can fail in ``preview_sent``
+    without a single delivery row existing, and telling that creator "ein Teil
+    deiner Abonnenten hat sie womöglich schon" would be untrue.
+    """
     appearance = session.get(Appearance, mailing.appearance_id)
     source = session.get(Source, appearance.source_id)
     creator = session.get(Creator, source.creator_id)
-    started = status in (MailingStatus.PREVIEW_SENT, MailingStatus.SENDING)
-    kind = NoticeKind.SEND_FAILED if started else NoticeKind.PREVIEW_FAILED
-    return creator, kind, {"video_title": appearance.title, "appearance_id": appearance.id}
+    return (
+        creator,
+        _notice_kind(mailing),
+        {"video_title": appearance.title, "appearance_id": appearance.id},
+    )
+
+
+def _notice_kind(mailing: Mailing) -> NoticeKind:
+    """Which of the three truths applies to this failed mailing.
+
+    The status decides, not the delivery ledger: a crash between the provider
+    accepting a batch and the commit that records it leaves rows unmarked even
+    though the mails went out. Once a send has begun, "nobody got it" is a
+    claim nobody can make — so it is only made while the send never started.
+    """
+    if mailing.preview_sent_at is None:
+        return NoticeKind.PREVIEW_FAILED  # the creator never even saw it
+    if mailing.status == MailingStatus.SENDING:
+        return NoticeKind.SEND_FAILED  # some fans may have it, the rest do not
+    return NoticeKind.NOT_SENT  # the preview arrived, the send never began
 
 
 #: The manifest's retention periods are days; a daily sweep honours them.
@@ -398,7 +437,20 @@ def main() -> None:
         sentiment=settings.llm.model_sentiment,
         summary_prompt=settings.llm.summary_prompt_version,
         sentiment_prompt=settings.llm.sentiment_prompt_version,
+        # What we book is an estimate; this is where the provider says what was
+        # really spent, per model and per key.
+        spend_reported_at=settings.llm.usage_dashboard,
     )
+    for name, checked_on in stale_prices(settings, datetime.now(UTC).date()).items():
+        # The ledger is what a customer's price gets calculated from; an
+        # unchecked price quietly outliving a provider's change is the one way
+        # it lies without anything failing.
+        logger.error(
+            log.LLM_PRICES_STALE,
+            model=name,
+            checked_on=checked_on,
+            check_against=settings.llm.usage_dashboard,
+        )
     for name, consequence in missing_secrets(settings, NEEDED_SECRETS).items():
         logger.error(log.CONFIG_SECRET_MISSING, name=name, consequence=consequence)
     while not _stopping:

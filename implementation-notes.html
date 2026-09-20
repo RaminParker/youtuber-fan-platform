@@ -60,7 +60,7 @@
 <p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
 <p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
 <code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
-Stand: 18.09.2026 — M6 (Zeitplan, Vorschau, Versand) umgesetzt: 536 Tests grün, Lint sauber, Live-Abnahme offen. Davor am selben Tag M5 (Fan-Bereich), per Code-Review geprüft und gehärtet. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
+Stand: 20.09.2026 — M6 (Zeitplan, Vorschau, Versand) umgesetzt, live abgenommen und nach einem Code-Review mit 19 Befunden gehärtet: 662 Tests grün, Lint sauber. Davor am selben Tag M5 (Fan-Bereich), per Code-Review geprüft und gehärtet. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
 
 <div class="toc">
   <strong>Inhalt</strong>
@@ -877,6 +877,173 @@ gescheitert. Die geänderten Planstellen tragen den Marker „<em>Changed 2026-0
   <p>Fußzeilen standen auf 12,8 px und die gedämpfte Farbe war für den Dunkelmodus nie angepasst. Jetzt
   mindestens 16 px überall, Hierarchie über Farbe und Fettung; <code>--muted</code> hat im Dunkelmodus einen
   eigenen Wert, und <code>--bg</code> hatte dort einen durchsichtigen Farbwert (Tippfehler) — beides behoben.</p>
+</div>
+
+<h3>Nach dem Code-Review von M6 (20.09.2026)</h3>
+<p class="meta">19 Befunde, alle behoben. Die schwersten saßen an Transaktionsgrenzen und in Fehlerpfaden,
+die kein Test mit Fakes erreicht.</p>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">steps.py</span></div>
+  <h4>Ein gefangener Datenbankfehler ließ den Commit still durchlaufen — und verwarf alles</h4>
+  <p>Gegen Postgres nachgestellt: Nach einem gefangenen Fehler meldet <code>session.commit()</code> Erfolg und
+  verwirft jeden Schreibvorgang der Transaktion. Im Backfill-Pfad hieß das: Die eben bezahlte Zusammenfassung
+  verschwindet, das Video bleibt <code>transcribed</code>, und der Worker bezahlt sie im nächsten Tick erneut —
+  täglich, bis der Kostendeckel greift.</p>
+  <span class="label">Behoben</span>
+  <p>Was bezahlt ist, wird committet, bevor der Schritt ein weiteres Risiko eingeht; jeder Ausstieg aus einem
+  <code>except</code> rollt vorher zurück. Zwei Tests, beide zuvor rot; als Stolperfalle 24 festgehalten.</p>
+</div>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">mailing.py</span></div>
+  <h4>Ein vollständig versendetes Mailing konnte als <code>failed</code> enden</h4>
+  <p>Der Übergang <code>sending → sent</code> wurde erst außerhalb des Advisory-Locks committet. Brach beim
+  Entsperren die Verbindung — nach langem Versand ein realer Fall —, rollte alles zurück, das Mailing wurde
+  <code>failed</code>, und der Creator las „ein Teil deiner Abonnenten hat sie womöglich schon bekommen",
+  obwohl alle sie hatten.</p>
+  <span class="label">Behoben</span>
+  <p>Der Abschluss wird im Schloss committet; ein fehlgeschlagenes Entsperren verwirft die Verbindung und wird
+  geloggt, statt den Versand mitzureißen.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §9.4</span></div>
+  <h4>Lange Listen brachen endgültig ab, gesperrte Adressen bekamen Folge-Batches</h4>
+  <p>Die Retry-Leiter zählte über die gesamte Lebensdauer statt gegen den Fortschritt: 50 Batches, zehn
+  verstreute Aussetzer, und das Mailing endete mit tausend nie versendeten Mails. Der Sperrfilter lief nur beim
+  Snapshot, sodass jemand, der mitten im Versand Spam meldet, die restlichen Batches trotzdem bekam.</p>
+  <span class="label">Behoben, mit dir entschieden</span>
+  <p>Ein durchgelaufener Batch setzt die Versuche zurück. Jeder Batch liest die Sperrliste neu; die Zeile bleibt
+  ungesendet, und die Empfängerzahl zählt nur tatsächlich Versendetes. Abmelden bleibt wie entschieden bei der
+  Momentaufnahme — eine Beschwerde kostet den Ruf aller Creator, eine Abmeldung nicht.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Worker</span></div>
+  <h4>Drei Mitteilungen statt zwei, und keine mehr vor dem Commit</h4>
+  <p>Ein Mailing konnte in <code>preview_sent</code> scheitern, ohne dass je eine Zustellzeile existierte — die
+  Mitteilung behauptete trotzdem, ein Teil der Fans habe die Mail. Jetzt entscheidet das Zustellbuch:
+  Vorschau kam nicht an, Mail ging gar nicht raus, oder ein Teil ist unterwegs. Die Mitteilung für Auftritte ging
+  zudem noch aus der offenen Sitzung raus (Stolperfalle 1); jetzt wie beim Mailing erst nach dem Commit.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Betrieb</span></div>
+  <h4>Ein Mailing wartete unbegrenzt, und Betreiber-Fehler waren im Web-Prozess unsichtbar</h4>
+  <p>War YouTube zur Sendezeit nicht erreichbar, parkte das Mailing stündlich weiter — der Creator hatte eine
+  Vorschau mit Uhrzeit gesehen, und die Mail ging still nie raus. Jetzt gibt es eine Frist von zwölf Stunden
+  nach der Sendezeit, danach endet das Mailing mit ehrlicher Mitteilung. Außerdem meldeten die drei Sendewege
+  außerhalb des Workers (Bestätigungsmail, Magic-Link, Creator-Mitteilung) einen abgelehnten Schlüssel nirgends;
+  sie nutzen jetzt denselben Melder <code>operator.action_needed</code>, und die CLI fängt den Fehlertyp wieder.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Tagesjob, Seiten, Tests</span></div>
+  <h4>Weitere Befunde</h4>
+  <p>Die Löschfristen hingen an der Video-Neuprüfung (ein Fehler blockierte sie einen Tag); eine Antwort, in der
+  <em>kein</em> Video mehr vorkommt, gilt ab fünf Videos als kaputt statt als „alle gelöscht". Der
+  Idempotency-Key der Vorschau trägt jetzt einen Fingerabdruck des Inhalts, weil ein später Versuch die
+  Sendezeit neu schiebt. Eine unbekannte URL liefert die gebrandete Fehlerseite statt rohem JSON. Die
+  Markenfarbe wird auch als <em>Fläche</em> geprüft (3:1 nach WCAG 1.4.11), der Fokusrahmen nutzt im Dunkelmodus
+  die dunkle Variante. In den Tests werden Jinja-Umgebung und Logging jetzt in <code>conftest.py</code>
+  zurückgesetzt, sonst hing das Ergebnis an der Testreihenfolge. Dazu ein Teilindex für die Batch-Abfrage.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Design</span></div>
+  <h4>Designwerte standen doppelt — jetzt eine Quelle</h4>
+  <p>21 Farbwerte auf drei Dateien verteilt, drei davon identisch in Seiten-CSS und Mail-Template; Schriftgrößen
+  in beiden Welten unabhängig gesetzt. Der Grund ist echt (Mail-Programme ignorieren externe Stylesheets), taugt
+  aber nicht als Begründung für zwei Quellen: Wer eine Farbe ändert, musste an zwei Stellen denken.</p>
+  <span class="label">Behoben, test-first</span>
+  <p><code>app/design.py</code> hält jede Farbe und jede Größe. Die Seitenhülle gibt sie als CSS-Variablen aus,
+  die Mail-Hülle setzt dieselben Werte inline. Zwei Tests verbieten beiden Dateien eigene Farbwerte, ein dritter
+  prüft, dass der Dunkelmodus jede Farbe der Tagvariante beantwortet — genau die Lücke, aus der die blasse
+  Fußzeile entstand. Beim Umbau fiel prompt ein Fehler auf: Die HTML-Maskierung zerlegte die Schriftliste, jede
+  Seite lief in Serifen; auch das hält jetzt ein Test fest.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Kosten</span></div>
+  <h4>Der Preistabelle war nicht zu trauen — drei Lücken</h4>
+  <p>Die Preise waren handgepflegt, ohne Herkunft und ohne Datum; bepreist wurde das <em>angefragte</em> Modell,
+  protokolliert das <em>tatsächlich genutzte</em>; und zwischengespeicherte Eingaben, die der Gateway bereits
+  ausweist, wurden zum vollen Preis gerechnet. Eine Live-Quelle gibt es nicht: Der Gateway liefert keine Kosten
+  und hat keine nutzbare Preis-Schnittstelle.</p>
+  <span class="label">Behoben, test-first</span>
+  <p>Bepreist wird jetzt das antwortende Modell (die datierte Fassung wird ihrer Familie zugeordnet); ein Modell
+  ohne Preis bucht 0, ist als <code>price_source = "unknown"</code> markiert und erzeugt
+  <code>operator.action_needed</code>. Jede Zeile hält den angewandten Preis fest, damit alte Buchungen eine
+  Preisänderung überleben. Cache-Token werden mit ihren Faktoren gerechnet (0,1× lesen, 1,25× schreiben). Jeder
+  Preis trägt Herkunft und Prüfdatum, und der Worker meldet Preise, die älter als drei Monate sind. Fünf
+  Mutationsproben, alle getötet. Die Rechnung des Anbieters bleibt maßgeblich; das steht jetzt in der README.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Modell</span></div>
+  <h4>Modellwechsel vorbereitet, nicht vollzogen</h4>
+  <p>Wir laufen auf einem Modell der vorigen Generation. Das neuere ist jetzt im Gateway freigegeben und
+  bepreist, produktiv bleibt vorerst das alte. <code>eval-prompts</code> nimmt ein <code>--model</code> und
+  schreibt den Modellnamen in den Dateinamen, sodass beide Läufe über dieselben Transkripte nebeneinander
+  liegen. Erster Vergleich: gleiche Qualität, das neuere Modell ist trotz längerer Antworten günstiger
+  (1,51 statt 1,72 Cent für dasselbe Transkript).</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Kosten, Modell</span></div>
+  <h4>Sonnet 5 ist produktiv, der Wechsel kostet drei Schritte</h4>
+  <p>Ein Modellname stand an vier Stellen: zweimal in den Einstellungen, zweimal in der Gateway-Konfiguration.
+  Das ist die Sorte Doppelpflege, die eine halbe Stunde später als „no keys found for provider" zurückkommt.</p>
+  <span class="label">Umgesetzt</span>
+  <p>Die Einstellungen entscheiden, <code>uv run app gateway-config</code> schreibt dieselben Namen in die
+  Gateway-Datei, ein Test weist Abweichungen zurück. Produktiv läuft jetzt <code>claude-sonnet-5</code>; der alte
+  Preis bleibt stehen, damit frühere Buchungen erklärbar bleiben. Live geprüft: angefragt und geantwortet stimmen
+  überein, gebucht wird 0,2682 Cent aus dem hinterlegten Preis.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Transparenz</span></div>
+  <h4>Die Wahrheit ist ein Link, keine Kopie</h4>
+  <p>Was wirklich ausgegeben wurde, zeigt die Nutzungsseite des Anbieters — je Modell, je Schlüssel, je Zeitraum.
+  Sie steht als <code>usage_dashboard</code> in der Konfiguration und wird überall mitgedruckt, wo die App Zahlen
+  nennt (Worker-Start, Warnung zu alten Preisen, <code>eval-prompts</code>).</p>
+  <span class="label">Verworfen</span>
+  <p>Diese Seite in die eigene Datenbank zu spiegeln. Das wäre eine zweite Quelle, die still veraltet, sobald der
+  Anbieter seine Abrechnung ändert; ein Link bleibt richtig. Ein eigenes Preisabfrage-Werkzeug gibt es ohnehin
+  nicht, und der Gateway liefert weder Kosten noch eine Preis-Schnittstelle.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Datenschutz</span></div>
+  <h4>Kosten sieht nur der Betreiber</h4>
+  <p>Verbrauch und Kosten liegen in der Datenbank, in den Logs und in Betreiber-Befehlen. Ein Test weist jedes
+  Template zurück, das davon spricht — damit weder ein Fan noch ein Creator erfährt, was sein Kanal kostet.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Review 20.09.2026</span></div>
+  <h4>Zweiter Review: zehn Befunde, zwei davon ernst</h4>
+  <p><strong>Der Dunkelmodus war weg.</strong> Beim Zusammenführen der Designwerte habe ich das Stylesheet neu
+  geschrieben und dabei den <code>prefers-color-scheme</code>-Block verloren. Die dunklen Varianten wurden weiter
+  berechnet und an die Seite gegeben — gelesen hat sie niemand. Ein dunkles Markenlogo wäre im Dunkelmodus wieder
+  unsichtbar gewesen. Jetzt gibt es den Block wieder und zwei Tests: jede gesetzte Variable braucht einen Leser,
+  und das Stylesheet muss den Dunkelmodus beantworten.</p>
+  <p><strong>Ein Modell ohne Preis buchte 0</strong> — und machte damit den Tagesdeckel blind, der ja die
+  Buchungen summiert. Jetzt wird ersatzweise der Preis des angefragten Modells genommen (der ist beim Start
+  garantiert vorhanden), die Zeile als <code>assumed</code> markiert und gemeldet. Das tote
+  <code>require_known</code> ist entfernt.</p>
+  <p>Dazu acht kleinere: Die Zuordnung eines Modellnamens rät nicht mehr bei kurzen Aliassen; die Fehlermitteilung
+  behauptet nach Versandbeginn nicht mehr „niemand hat sie bekommen" (ein Absturz zwischen Annahme und Buchung
+  sieht von außen genauso aus); der 404-Hinweis nennt jetzt auch <code>app gateway-config</code>;
+  <code>eval-prompts</code> druckt „price not configured" statt einer falschen Null;
+  <code>gateway-config</code> verträgt unvollständige Konfigurationen.</p>
+  <span class="label">Widerlegt</span>
+  <p>Der Verdacht, unsere Cache-Abrechnung beruhe auf falschen Annahmen. Gegen den echten Gateway gemessen: Ein
+  10k-Token-Prompt zweimal gesendet meldete beide Male <code>prompt_tokens: 10155</code>, einmal mit
+  <code>cache_write_tokens: 10144</code>, einmal mit <code>cached_tokens: 10144</code>. Der zwischengespeicherte
+  Teil steckt also in <code>prompt_tokens</code>, genau wie die Rechnung es annimmt. Die Messung ist als Test
+  hinterlegt.</p>
 </div>
 
 <h2 id="abweichungen">3. Abweichungen vom Plan</h2>

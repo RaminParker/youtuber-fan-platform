@@ -120,7 +120,8 @@ def _send_magic_link(creator: Creator, token: str) -> None:
     link = f"{settings.base_url}/creator/login/{token}"
     try:
         get_services().email.send(render_magic_link_mail(creator, link, settings))
-    except Exception:
+    except Exception as error:
+        log.report_operator_action(error, creator_id=creator.id)
         logger.exception(log.CREATOR_MAGIC_LINK_FAILED, creator_id=creator.id)
         _withdraw_magic_link(creator.id, hash_token(token))
         return

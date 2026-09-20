@@ -21,6 +21,10 @@ PAGE_DARK = "#171612"
 #: WCAG 2.1 AA for normal text.
 AA_CONTRAST = 4.5
 
+#: WCAG 2.1 AA for interface elements (1.4.11): a button has to be visible as a
+#: shape before its label matters.
+UI_CONTRAST = 3.0
+
 #: How far one step moves a colour towards white or black. Small enough to stop
 #: close to the brand, large enough to always arrive.
 STEP = 0.06
@@ -64,6 +68,16 @@ def ink_on(accent: str) -> str:
     return "#ffffff" if contrast("#ffffff", accent) >= contrast("#111111", accent) else "#111111"
 
 
+def surface_on(accent: str, background: str) -> str:
+    """Return the accent as a *surface* — a button, a rule — on ``background``.
+
+    Less strict than text: an element only has to be distinguishable as a
+    shape. Which is why a brand can keep more of itself here than it can in a
+    link, and why this is a separate question from :func:`readable_on`.
+    """
+    return _moved_until(accent, background, UI_CONTRAST)
+
+
 def readable_on(accent: str, background: str) -> str:
     """Return the accent, moved just far enough to be readable on ``background``.
 
@@ -71,7 +85,12 @@ def readable_on(accent: str, background: str) -> str:
     away from a light one towards black. The hue is kept, because this is still
     the creator's colour — only its lightness is negotiable.
     """
-    if contrast(accent, background) >= AA_CONTRAST:
+    return _moved_until(accent, background, AA_CONTRAST)
+
+
+def _moved_until(accent: str, background: str, wanted: float) -> str:
+    """Lighten or darken the accent along its hue until it clears ``wanted``."""
+    if contrast(accent, background) >= wanted:
         return accent
 
     target = 255 if _relative_luminance(background) < 0.5 else 0
@@ -79,6 +98,6 @@ def readable_on(accent: str, background: str) -> str:
     for step in range(1, int(1 / STEP) + 1):
         moved = tuple(channel + (target - channel) * (step * STEP) for channel in channels)
         candidate = _hex(moved)
-        if contrast(candidate, background) >= AA_CONTRAST:
+        if contrast(candidate, background) >= wanted:
             return candidate
     return "#ffffff" if target else "#111111"

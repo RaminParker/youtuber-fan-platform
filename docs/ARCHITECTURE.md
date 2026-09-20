@@ -9,6 +9,7 @@ the code that exists is cut, and records the decisions behind it.
 | You want to change… | Go to |
 |---|---|
 | a tunable value | `config/settings.toml` — the comments there are the documentation |
+| a colour, a font size, a corner radius | `src/app/design.py` — pages and mails both read it |
 | a secret or an environment-specific value | `.env.example` lists every one |
 | what a table looks like | `src/app/db/models.py`, one file, all tables and vocabularies |
 | the name of a log event | `src/app/log.py` — the constants are the authority |
@@ -101,6 +102,16 @@ payload under a stable idempotency key. The alternative — hashing the body int
 the key — was rejected because it turns a changed body into a second mail for
 recipients who had already received the first.
 
+### One source for what the product looks like
+Pages carry a stylesheet, mails carry inline rules, because mail clients drop
+everything else. That is a constraint on where rules end up, not on where they
+are decided: `app/design.py` holds every colour and size, the page shell emits
+them as custom properties, the mail shell inlines the same values. A test keeps
+both honest — neither file may name a colour of its own — because a colour
+changed in one and forgotten in the other is how a product starts looking like
+two products. What is *not* in there is the creator's accent: that varies per
+customer, lives in the database, and is made readable below.
+
 ### The brand colour stays; what must be read is derived from it
 A creator picks one colour, and it then has to work on a white mail, a light
 page and a dark one. Left alone it fails at least one of those — near-black
@@ -163,6 +174,50 @@ Provenance is stored with every transcript because it is legally relevant: the
 official API and the unofficial library are not the same thing in a dispute.
 
 ## The cost ledger
+
+It is an **estimate**, and it says so: the provider's invoice is the authority.
+What makes the estimate trustworthy is that every line can be checked years
+later. Four rules:
+
+- **The price follows the model that answered**, not the one that was asked
+  for. The configuration names a family (`anthropic/claude-sonnet-4-5`), the
+  gateway answers with the snapshot it routed to (`…-20250929`); `price_of`
+  matches the family, and an exact entry wins over it.
+- **A model nobody priced is never booked at zero.** An answer that cannot be
+  matched is charged at the price of the model we *asked* for — start-up
+  guarantees that one has a price — and the row is marked `assumed`, with
+  `operator.action_needed` in the log. A zero would not be a missing number but
+  a wrong one: the daily cap sums the ledger, so zeros switch off the only
+  guard against a runaway loop.
+- **A shorter answer than any configured family is not guessed.** `claude-sonnet`
+  could be either of two configured models, and picking one would book a call at
+  another model's price with nothing saying so.
+- **Every row keeps the price it was booked at** (`price_input`,
+  `price_output`, `price_source`), so a line written before a price change
+  still means what it meant then.
+- **Cached input is billed at its own factors** (read ≈ 0.1×, write ≈ 1.25×),
+  because the provider does. The tokens are kept separately on the row.
+
+Prices carry a source and a check date in `config/settings.toml`; the worker
+logs `llm.prices_stale` at start once one is older than three months.
+
+**The invoice is a link, not a copy.** `llm.usage_dashboard` points at the
+provider's own usage page — spend per model, per key, per period, in dollars.
+It is printed with every figure the app produces (the worker's `llm.models`
+line at start, the stale-price warning, `eval-prompts`), because a number
+nobody can check is worth nothing. Mirroring that page into our database was
+rejected: it would be a second source that silently rots, and the link stays
+correct when the provider changes how it bills.
+
+**Cost is the operator's, and nobody else's.** It lives in `llm_calls`, in the
+logs and in operator commands. No page and no mail may show it — not to a fan,
+and not to a creator, who would learn what their channel costs us and start
+negotiating against our margin. A test refuses any template that mentions it.
+
+**Switching the model** is `model_summary` / `model_sentiment` plus a price
+entry in `config/settings.toml`, then `uv run app gateway-config`, which
+teaches the gateway the same names, and a recreate. The application settings
+decide; the gateway file follows. A test refuses a mismatch.
 
 `record_call` writes in a session of its own and commits immediately. This is
 deliberate and load-bearing: a step that pays for a summary and then fails on a
@@ -269,11 +324,27 @@ Four mechanisms, each necessary:
    written with `preview_sent`. The repeat in (2) is therefore byte-identical —
    what the provider does with a known key and a changed body is undocumented,
    and this design never asks.
-4. **Advisory lock.** `send` holds `pg_try_advisory_lock(mailing_id)` on a
+4. **A block re-read per batch.** `_pending` filters blocked addresses again
+   for every batch, not once at the snapshot: a bounce or a complaint that
+   lands mid-send stops the rest. Those rows stay unsent, which is what the
+   ledger should say about them, and `recipient_count` counts what was sent.
+5. **Advisory lock.** `send` holds `pg_try_advisory_lock(mailing_id)` on a
    connection of its own for the whole run — a *session* lock, because a
    transaction lock would end with the first batch's commit. A second worker
    (a deploy overlap) finds it taken and returns. A failed unlock throws the
    connection away instead of returning it to the pool still locked.
+
+Three rules keep the send honest when something goes wrong:
+
+- **Progress clears the ladder.** A batch that went through resets `attempts`,
+  so a long list cannot die of ten scattered provider hiccups with most of it
+  unsent.
+- **The finish is committed inside the lock.** Releasing the lock is the last
+  thing that can fail, and a finished send must not be undone by it; a failed
+  unlock throws the connection away and is logged, never raised.
+- **A mailing does not wait forever.** Anything only an operator can fix parks
+  the row hourly — but past `GIVE_UP_ON_A_MAILING_AFTER` the mailing ends and
+  the creator is told, because they were shown a preview naming a time.
 
 ### The creator's brakes
 

@@ -6,7 +6,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from app.analysis.llm import BifrostGateway, LLMError, LLMTemporaryError, cost_cents, day_start
+from app.analysis.llm import BifrostGateway, LLMError, LLMTemporaryError, day_start, price_of
 from app.analysis.schemas import Sentiment, Summary
 from app.config import get_settings
 from app.errors import TemporaryError
@@ -142,16 +142,18 @@ class TestCost:
         settings = get_settings()
 
         # 5000 in at 3.00/M = 0.015, 800 out at 15.00/M = 0.012 -> 0.027 -> 2.7 cents
-        cost = cost_cents("anthropic/claude-sonnet-4-5", 5_000, 800, settings)
+        cost = price_of("anthropic/claude-sonnet-4-5", settings).cost_cents(5_000, 800)
 
         assert cost == Decimal("2.7")
 
     def test_a_free_call_costs_nothing(self):
-        assert cost_cents("anthropic/claude-sonnet-4-5", 0, 0, get_settings()) == 0
+        assert price_of("anthropic/claude-sonnet-4-5", get_settings()).cost_cents(0, 0) == 0
 
     def test_it_is_exact_not_floating(self):
         # Money in floats is how ledgers stop adding up.
-        assert isinstance(cost_cents("anthropic/claude-sonnet-4-5", 1, 1, get_settings()), Decimal)
+        priced = price_of("anthropic/claude-sonnet-4-5", get_settings())
+
+        assert isinstance(priced.cost_cents(1, 1), Decimal)
 
 
 class TestDayBoundary:

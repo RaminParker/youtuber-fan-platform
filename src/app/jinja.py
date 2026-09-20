@@ -14,8 +14,9 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
-from app.branding import PAGE_DARK, PAGE_LIGHT, ink_on, readable_on
+from app.branding import PAGE_DARK, PAGE_LIGHT, ink_on, readable_on, surface_on
 from app.config import Settings, get_settings
+from app.design import Design
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -82,6 +83,9 @@ def build_environment(settings: Settings) -> Environment:
     environment.globals["ink_on"] = ink_on
     environment.globals["link_on_light"] = lambda accent: readable_on(accent, PAGE_LIGHT)
     environment.globals["link_on_dark"] = lambda accent: readable_on(accent, PAGE_DARK)
+    environment.globals["surface_on_light"] = lambda accent: surface_on(accent, PAGE_LIGHT)
+    environment.globals["surface_on_dark"] = lambda accent: surface_on(accent, PAGE_DARK)
+    environment.globals["design"] = Design
     environment.globals["product"] = settings.product
     environment.globals["base_url"] = settings.base_url
     return environment

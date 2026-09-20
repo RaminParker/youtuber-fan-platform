@@ -12,8 +12,9 @@ working on.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -21,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from app import log
 from app.addresses import InvalidAddress, validate
-from app.analysis.llm import LLMError, cost_cents
+from app.analysis.llm import LLMError, price_of
 from app.analysis.stored import load_analysis
 from app.analysis.summarize import summarise
-from app.config import get_settings
+from app.config import REPO_ROOT, get_settings
 from app.db.engine import session_scope
 from app.db.models import (
     AnalysisKind,
@@ -35,8 +36,9 @@ from app.db.models import (
     SourceKind,
 )
 from app.delivery.email_client import EmailError
+from app.delivery.mailing import recipient_count
 from app.delivery.render import OutgoingEmail, render_summary_mail
-from app.errors import TemporaryError
+from app.errors import NeedsOperator, TemporaryError
 from app.jobs import steps
 from app.services import get_services
 from app.sources.youtube import feed as youtube_feed
@@ -220,6 +222,9 @@ def handle_demo_mails(args: argparse.Namespace) -> None:
                     variant=variant,
                     stop_token="demo",
                     send_at=datetime.now(UTC),
+                    recipient_count=recipient_count(session, creator.id),
+                    postpone_until=datetime.now(UTC)
+                    + timedelta(hours=settings.schedule.postpone_hours),
                     view_url=f"{settings.base_url}/s/{appearance.view_token}",
                 )
                 stem = f"{appearance.external_id}.{variant}"
@@ -244,6 +249,11 @@ def handle_eval_prompts(args: argparse.Namespace) -> None:
     it is a command and not a test.
     """
     settings = get_settings()
+    if args.model:
+        # Comparing two models over the same transcripts is the only honest way
+        # to decide a switch: same prompts, same input, both outputs on disk.
+        settings = settings.model_copy(deep=True)
+        settings.llm.model_summary = args.model
     transcripts = sorted(SAMPLE_TRANSCRIPTS.glob("*.srt"))
     if not transcripts:
         sys.exit(f"No sample transcripts in {SAMPLE_TRANSCRIPTS}.")
@@ -263,12 +273,18 @@ def handle_eval_prompts(args: argparse.Namespace) -> None:
         )
         summary = completion.result
         target = out / f"{path.stem}.{settings.llm.summary_prompt_version}.md"
+        target = target.with_name(f"{target.stem}.{completion.model.split('/')[-1]}{target.suffix}")
         target.write_text(_as_markdown(path.stem, summary, completion), encoding="utf-8")
         print(
             f"  -> {target}  "
             f"({completion.tokens_in} in, {completion.tokens_out} out, "
-            f"{cost_cents(settings.llm.model_summary, completion.tokens_in, completion.tokens_out, settings):.2f} cents)"
+            f"{price_of(completion.model, settings).cost_cents(completion.tokens_in, completion.tokens_out, completion.tokens_cached, completion.tokens_cache_write):.2f} cents)"
         )
+
+    # Our arithmetic, not the invoice: say where the invoice lives.
+    print(
+        f"\nEstimated from config/settings.toml. What was really spent: {settings.llm.usage_dashboard}"
+    )
 
 
 def _as_markdown(name: str, summary, completion) -> str:
@@ -299,6 +315,39 @@ def _as_markdown(name: str, summary, completion) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: The gateway's configuration, which has to agree with the models above.
+GATEWAY_CONFIG = REPO_ROOT / "config" / "bifrost.json"
+
+
+def handle_gateway_config(args: argparse.Namespace) -> None:
+    """Write the configured models into the gateway's configuration.
+
+    A model has to be named in three places: the application settings, the
+    provider key (which models this key may serve) and the virtual key (which
+    models the application may ask for). Keeping the last two by hand is how a
+    model switch ends in "no keys found for provider" half an hour later — so
+    settings.toml decides and this command copies.
+    """
+    settings = get_settings()
+    wanted = sorted({settings.llm.model_summary, settings.llm.model_sentiment})
+    config = json.loads(GATEWAY_CONFIG.read_text(encoding="utf-8"))
+
+    for name in wanted:
+        provider, _, model = name.partition("/")
+        if provider not in config["providers"]:
+            sys.exit(f"The gateway has no provider {provider!r}; add it to {GATEWAY_CONFIG.name}.")
+        for key in config["providers"][provider]["keys"]:
+            key["models"] = sorted(set(key.get("models", [])) | {model})
+        for virtual_key in config["governance"]["virtual_keys"]:
+            for allowed in virtual_key["provider_configs"]:
+                if allowed["provider"] == provider:
+                    allowed["allowed_models"] = sorted(set(allowed["allowed_models"]) | {model})
+
+    GATEWAY_CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    print(f"{GATEWAY_CONFIG.name} now serves: {', '.join(wanted)}")
+    print("Apply it with: docker compose up -d --force-recreate bifrost")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line interface."""
     parser = argparse.ArgumentParser(prog="app", description=__doc__.splitlines()[0])
@@ -310,6 +359,11 @@ def build_parser() -> argparse.ArgumentParser:
     onboard.add_argument("--email", required=True, help="login and notices")
     onboard.add_argument("--channel-id", required=True, help="the UC… channel id")
     onboard.set_defaults(handler=handle_onboard)
+
+    gateway = subcommands.add_parser(
+        "gateway-config", help="teach the gateway the models from settings.toml"
+    )
+    gateway.set_defaults(handler=handle_gateway_config)
 
     poll = subcommands.add_parser("poll", help="read the feed once, now")
     poll.add_argument("slug")
@@ -337,6 +391,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument("--out", default="out", help="where to write the rendered summaries")
     evaluate.add_argument("--channel", default="Beispielkanal", help="channel name for the prompt")
+    evaluate.add_argument(
+        "--model", default="", help="run against this model instead of the configured one"
+    )
     evaluate.set_defaults(handler=handle_eval_prompts)
 
     return parser
@@ -369,7 +426,14 @@ def main(argv: list[str] | None = None) -> None:
     log.bind(command=args.command, at=datetime.now(UTC).isoformat())
     try:
         args.handler(args)
-    except (TemporaryError, YouTubeError, LLMError, EmailError, GrantRevoked) as error:
+    except (
+        NeedsOperator,
+        TemporaryError,
+        YouTubeError,
+        LLMError,
+        EmailError,
+        GrantRevoked,
+    ) as error:
         # These are the ways the outside world says no. A traceback would tell
         # the operator nothing they can act on; a bug still gets one.
         sys.exit(explain(error))

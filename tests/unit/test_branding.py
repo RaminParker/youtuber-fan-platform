@@ -7,7 +7,7 @@ creator never sees it, because their own machine may be in the other mode.
 
 import pytest
 
-from app.branding import AA_CONTRAST, contrast, ink_on, readable_on
+from app.branding import AA_CONTRAST, UI_CONTRAST, contrast, ink_on, readable_on, surface_on
 
 DARK_PAGE = "#171612"
 LIGHT_PAGE = "#ffffff"
@@ -54,3 +54,33 @@ class TestTextOnTheAccentItself:
     def test_white_on_a_dark_brand_black_on_a_light_one(self):
         assert ink_on("#0b5cff") == "#ffffff"
         assert ink_on("#ffe500") == "#111111"
+
+
+class TestTheAccentAsASurface:
+    """A button is a shape before it is a label: it has to be visible at all.
+
+    WCAG 1.4.11 asks 3:1 for interface elements against what surrounds them.
+    The near-black default reaches 1.4 on a dark page — a creator in dark mode
+    would see white text floating on nothing.
+    """
+
+    @pytest.mark.parametrize("accent", ACCENTS)
+    @pytest.mark.parametrize("page", [LIGHT_PAGE, DARK_PAGE])
+    def test_every_accent_becomes_a_visible_shape(self, accent, page):
+        assert contrast(surface_on(accent, page), page) >= UI_CONTRAST
+
+    @pytest.mark.parametrize("accent", ACCENTS)
+    @pytest.mark.parametrize("page", [LIGHT_PAGE, DARK_PAGE])
+    def test_and_its_label_still_reads_on_it(self, accent, page):
+        surface = surface_on(accent, page)
+
+        assert contrast(ink_on(surface), surface) >= AA_CONTRAST
+
+    def test_a_brand_that_already_stands_out_is_left_alone(self):
+        assert surface_on("#c4452d", DARK_PAGE) == "#c4452d"
+
+    def test_the_default_grey_is_lifted_off_a_dark_page(self):
+        lifted = surface_on("#333333", DARK_PAGE)
+
+        assert lifted != "#333333"
+        assert contrast(lifted, DARK_PAGE) >= UI_CONTRAST

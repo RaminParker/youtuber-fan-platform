@@ -1,11 +1,10 @@
 """Operator commands. The CLI ingests and reports; it never runs a step."""
 
-from datetime import UTC, datetime
-
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import cli
+from app.config import get_settings
 from app.db.engine import session_scope
 from app.db.models import Appearance, AppearanceStatus, Creator, Source
 from app.services import set_services
@@ -143,7 +142,12 @@ class TestProcess:
 class TestTimestamps:
     def test_the_source_records_when_it_was_onboarded(self, connector):
         # Everything published before that moment is back catalogue.
-        before = datetime.now(UTC)
+        # Both moments come from the database clock, because that is the clock
+        # that writes `created_at`: comparing it against the application's own
+        # clock fails whenever the two drift by a few milliseconds, which they
+        # do (the database runs in a container).
+        with session_scope() as session:
+            before = session.scalar(select(func.now()))
 
         onboard()
 
@@ -163,7 +167,15 @@ class TestEvalPrompts:
         cli.main(["eval-prompts", "--out", str(tmp_path)])
 
         written = sorted(p.name for p in tmp_path.glob("*.md"))
-        assert written == ["de_kurz.v1.md", "de_vortrag.v1.md", "en_interview.v1.md"]
+        # The model is part of the name: comparing two of them over the same
+        # transcripts is how a model switch gets decided, and that needs both
+        # runs side by side rather than one overwriting the other.
+        model = get_settings().llm.model_summary.split("/")[-1]
+        assert written == [
+            f"de_kurz.v1.{model}.md",
+            f"de_vortrag.v1.{model}.md",
+            f"en_interview.v1.{model}.md",
+        ]
         assert len(gateway.calls) == 3
 
     def test_the_output_is_meant_for_a_human_to_read(self, connector, tmp_path, fake_services):
@@ -173,7 +185,8 @@ class TestEvalPrompts:
 
         cli.main(["eval-prompts", "--out", str(tmp_path)])
 
-        rendered = (tmp_path / "de_vortrag.v1.md").read_text(encoding="utf-8")
+        model = get_settings().llm.model_summary.split("/")[-1]
+        rendered = (tmp_path / f"de_vortrag.v1.{model}.md").read_text(encoding="utf-8")
         assert rendered.startswith("# ")
         assert "## Kernaussage" in rendered
         assert "## Zitat" in rendered
@@ -232,6 +245,30 @@ class TestFailingReadably:
             onboard()
 
         assert "connection refused" in str(exited.value)
+
+    def test_a_rejected_key_names_itself(self, committed_database, fake_services):
+        # The reason this method exists: the operator is told which value to
+        # put in .env, not shown a stack trace.
+        from app.errors import NeedsOperator
+
+        set_services(
+            fakes.services(
+                youtube=FakeYouTubeConnector(
+                    fail_with=NeedsOperator(
+                        "YouTube Data API",
+                        "API key rejected: API_KEY_INVALID",
+                        "check YOUTUBE_API_KEY and the key's API restrictions",
+                    )
+                )
+            )
+        )
+
+        with pytest.raises(SystemExit) as exited:
+            onboard()
+
+        message = str(exited.value)
+        assert "YOUTUBE_API_KEY" in message
+        assert "Traceback" not in message
 
     def test_a_real_bug_still_gets_its_traceback(self, committed_database, fake_services):
         # Swallowing this would hide a defect behind a friendly sentence.

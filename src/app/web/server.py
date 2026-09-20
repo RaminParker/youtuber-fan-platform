@@ -84,6 +84,16 @@ NEEDED_SECRETS = {
 }
 
 
+def handle_unknown_address(request: Request, error: Exception) -> Response:
+    """Answer a wrong address with our own page, not the framework's JSON.
+
+    A mistyped or outdated link is the most common way to meet this product,
+    and ``{"detail":"Not Found"}`` tells whoever reads it that they have left
+    it. Registered for the status code, so it sees nothing else.
+    """
+    return not_found()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application.
 
@@ -116,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # One limiter for the whole app; the routes decorate themselves with it.
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, handle_rate_limited)
+    app.add_exception_handler(404, handle_unknown_address)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(public.router)

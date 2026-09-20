@@ -36,18 +36,34 @@ drop_with_links = true
 drop_channel_owner = true
 
 [llm]                                   # manifest §8
-model_summary = "anthropic/claude-sonnet-4-5"    # provider/model as the gateway addresses it
-model_sentiment = "anthropic/claude-sonnet-4-5"
+# Switching model: change these two lines and the price entry below, then run
+# `uv run app gateway-config` (writes the model into config/bifrost.json) and
+# `docker compose up -d --force-recreate bifrost`. A test refuses a mismatch.
+model_summary = "anthropic/claude-sonnet-5"    # provider/model as the gateway addresses it
+model_sentiment = "anthropic/claude-sonnet-5"
 max_output_tokens = 4000
 timeout_seconds = 120
 daily_cost_cap_cents = 500              # per creator per day (manifest §7.9)
 summary_prompt_version = "v1"
 sentiment_prompt_version = "v1"
 
+# What the provider says we actually spent — per model, per key, per period.
+# That page is the authority; everything the app books is an estimate of it.
+usage_dashboard = "https://console.anthropic.com/settings/usage"
+
 # Every model named above must have an entry here, or start-up fails: a model
 # swap would otherwise book cost 0 and silently bypass the daily cap.
+#
+# These numbers are what a creator's price will be calculated from, so each one
+# carries where it came from and when it was last checked. The worker says so
+# at start-up once an entry is older than three months (`llm.prices_stale`).
+# The provider's invoice stays the authority — this ledger is an estimate, and
+# cached input is billed at its own factors (see app/analysis/llm.py).
 [llm.prices_per_million_tokens]
-"anthropic/claude-sonnet-4-5" = { input = 3.00, output = 15.00 }
+"anthropic/claude-sonnet-5" = { input = 2.00, output = 10.00, source = "provider price list", checked_on = 2026-09-20 }
+"anthropic/claude-sonnet-4-5" = { input = 3.00, output = 15.00, source = "provider price list", checked_on = 2026-09-20 }
+# Kept although no longer in use: ledger rows written before the switch were
+# booked at this price, and they have to stay explainable.
 
 [email]                                 # manifest §7.6
 variants = ["compact", "detailed", "teaser"]

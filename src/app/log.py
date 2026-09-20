@@ -31,6 +31,7 @@ TRANSCRIPT_UNAVAILABLE = "transcript.unavailable"
 LLM_CALL = "llm.call"
 LLM_COST_CAP_HIT = "llm.cost_cap_hit"
 LLM_MODELS = "llm.models"
+LLM_PRICES_STALE = "llm.prices_stale"
 
 MAILING_SCHEDULED = "mailing.scheduled"
 MAILING_SENTIMENT_READY = "mailing.sentiment_ready"
@@ -45,6 +46,7 @@ MAILING_CANCELLED = "mailing.cancelled"
 MAILING_FAILED = "mailing.failed"
 MAILING_TRANSITION_LOST = "mailing.transition_lost"
 MAILING_SEND_LOCKED = "mailing.send_locked"
+MAILING_UNLOCK_FAILED = "mailing.unlock_failed"
 
 SUBSCRIPTION_CREATED = "subscription.created"
 SUBSCRIPTION_CONFIRMED = "subscription.confirmed"
@@ -75,6 +77,8 @@ CLEANUP_DONE = "cleanup.done"
 CLEANUP_RECHECK_FAILED = "cleanup.recheck_failed"
 
 OPERATOR_ACTION_NEEDED = "operator.action_needed"
+#: Anything that only a person can fix goes through `report_operator_action`,
+#: so the one event the README tells the operator to watch is complete.
 CONFIG_SECRET_MISSING = "config.secret_missing"
 
 WORKER_STARTED = "worker.started"
@@ -218,3 +222,29 @@ def bind(**values: Any) -> None:
 def clear_context() -> None:
     """Drop everything bound. Called at the end of a request or a step."""
     structlog.contextvars.clear_contextvars()
+
+
+def report_operator_action(error: Exception, **context: object) -> bool:
+    """Log a rejected key or an exhausted plan as the operator's, if it is one.
+
+    Every path that swallows a send failure calls this first: the web process
+    swallows them too (a sign-up must answer the same way whatever happened),
+    and without this line a revoked key would be invisible there.
+
+    Returns
+    -------
+    bool
+        Whether the error was one only a person can fix.
+    """
+    from app.errors import NeedsOperator
+
+    if not isinstance(error, NeedsOperator):
+        return False
+    get_logger(__name__).error(
+        OPERATOR_ACTION_NEEDED,
+        service=error.service,
+        problem=error.problem,
+        fix=error.fix,
+        **context,
+    )
+    return True

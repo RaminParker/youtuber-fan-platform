@@ -307,8 +307,16 @@ def cleanup(session: Session, now: datetime, settings: Settings) -> None:
         .with_for_update(skip_locked=True)
     )
     deleted = session.execute(delete(Subscriber).where(Subscriber.id.in_(orphans))).rowcount
+    # The deletions stand on their own from here: they protect privacy and must
+    # not be rolled back by anything the video platform does next.
+    session.commit()
     gone = _recheck_videos(session)
     logger.info(log.CLEANUP_DONE, subscriptions=expired, subscribers=deleted, videos_gone=gone)
+
+
+#: Above this, "not one of them came back" is treated as a broken answer
+#: rather than as a deleted catalogue.
+TOO_MANY_TO_LOSE_AT_ONCE = 5
 
 
 def _recheck_videos(session: Session) -> int:
@@ -332,8 +340,19 @@ def _recheck_videos(session: Session) -> int:
         return 0
     try:
         items = get_services().youtube.item_details([a.external_id for a in analysed])
+    except NeedsOperator as error:
+        log.report_operator_action(error, videos=len(analysed))
+        return 0
     except Exception:
         logger.exception(log.CLEANUP_RECHECK_FAILED, videos=len(analysed))
+        return 0
+
+    if not items and len(analysed) >= TOO_MANY_TO_LOSE_AT_ONCE:
+        # Absence is how this job learns that a video is gone. For one or two
+        # videos that is ordinary; for a whole catalogue it is far more likely
+        # that the answer was malformed than that every creator deleted
+        # everything on the same day — and retiring them all is irreversible.
+        logger.error(log.CLEANUP_RECHECK_FAILED, videos=len(analysed), reason="none_came_back")
         return 0
 
     public = {item.external_id for item in items if item.is_public}
@@ -369,7 +388,8 @@ def notify_creator(creator: Creator, kind: NoticeKind, **context) -> None:
     mail = render_notice_mail(creator, kind, settings, **context)
     try:
         get_services().email.send(mail)
-    except Exception:
+    except Exception as error:
+        log.report_operator_action(error, creator_id=creator.id, kind=kind)
         logger.exception(log.CREATOR_NOTICE_FAILED, creator_id=creator.id, kind=kind)
 
 
@@ -570,6 +590,11 @@ def summarize(session: Session, appearance_id: int, now: datetime) -> None:
     appearance.last_error = None
 
     if appearance.is_backfill:
+        # Commit what the model was already paid for. A database error inside
+        # the sentiment below would abort this transaction, and the commit that
+        # follows reports success while discarding every write — the summary
+        # would be gone and bought again on the next tick.
+        session.commit()
         _sentiment_now(session, appearance, source, creator, now, settings)
         return
 
@@ -599,6 +624,8 @@ def _sentiment_now(
     try:
         _fetch_sentiment(session, appearance, source, creator, now, settings)
     except Exception as error:
+        # The transaction may be the casualty here, not just the sentiment.
+        session.rollback()
         logger.warning(
             log.MAILING_SENTIMENT_SKIPPED, appearance_id=appearance.id, reason=str(error)
         )
@@ -733,13 +760,7 @@ def prepare_sentiment(session: Session, mailing_id: int, now: datetime) -> None:
         reason = "cost_cap"
     except NeedsOperator as error:
         # The mail goes on without the box; the operator is told, loudly.
-        logger.error(
-            log.OPERATOR_ACTION_NEEDED,
-            mailing_id=mailing.id,
-            service=error.service,
-            problem=error.problem,
-            fix=error.fix,
-        )
+        log.report_operator_action(error, mailing_id=mailing.id)
         reason = str(error)
     except Exception as error:
         reason = f"{type(error).__name__}: {error}"
@@ -747,6 +768,9 @@ def prepare_sentiment(session: Session, mailing_id: int, now: datetime) -> None:
         mailings.mark_sentiment_ready(session, mailing.id, comments_used=used)
         return
 
+    # Whatever went wrong may have aborted the transaction; the mail must still
+    # be able to go on without its comment box.
+    session.rollback()
     logger.warning(log.MAILING_SENTIMENT_SKIPPED, mailing_id=mailing.id, reason=reason)
     mailings.mark_sentiment_ready(session, mailing.id, comments_used=0)
 

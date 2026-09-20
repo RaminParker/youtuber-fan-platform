@@ -5,7 +5,8 @@
         {
           "value": "env.ANTHROPIC_API_KEY",
           "models": [
-            "claude-sonnet-4-5"
+            "claude-sonnet-4-5",
+            "claude-sonnet-5"
           ],
           "weight": 1
         }
@@ -22,7 +23,8 @@
           {
             "provider": "anthropic",
             "allowed_models": [
-              "claude-sonnet-4-5"
+              "claude-sonnet-4-5",
+              "claude-sonnet-5"
             ],
             "allow_all_keys": true
           }

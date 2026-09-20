@@ -56,6 +56,8 @@ uv run app poll pilot                  # Feed jetzt lesen
 uv run app process pilot <video-id>    # ein einzelnes Video aufnehmen
 uv run app demo-mails pilot --count 3  # Mails aller Varianten nach out/
 uv run app eval-prompts                # Prompts gegen Beispieltranskripte
+uv run app eval-prompts --model anthropic/<modell>   # zum Vergleich zweier Modelle
+uv run app gateway-config              # Modelle aus settings.toml in den Gateway schreiben
 ```
 
 Eine gesperrte Adresse (Bounce, Beschwerde) bekommt nie wieder Mail — die
@@ -108,23 +110,48 @@ Die echte Abnahme des Webhooks findet deshalb auf Render statt (Plan §17, M9).
 Ohne Webhook laufen die Tests trotzdem vollständig: Sie signieren ihre
 Ereignisse selbst.
 
+### Was die Kostenzahlen wert sind
+
+**Maßgeblich ist die Seite des Anbieters**, nicht unsere Rechnung: Sie zeigt
+live, was wirklich ausgegeben wurde — je Modell, je Schlüssel, je Zeitraum, in
+Dollar. Die Adresse steht in `config/settings.toml` unter `usage_dashboard`
+(heute <https://console.anthropic.com/settings/usage>; bei einem Wechsel zu
+OpenAI entsprechend <https://platform.openai.com/usage>) und wird überall
+mitgedruckt, wo die App Zahlen nennt: beim Start des Workers, in der Warnung zu
+alten Preisen und in `eval-prompts`. Gespiegelt wird diese Seite bewusst nicht
+— eine zweite Quelle würde still veralten.
+
+**Diese Zahlen sieht nur der Betreiber.** Sie liegen in der Datenbank, in den
+Logs und in Betreiber-Befehlen. Keine Seite und keine Mail zeigt sie: weder
+einem Fan noch einem Creator, der sonst erführe, was sein Kanal uns kostet. Ein
+Test weist jedes Template zurück, das davon spricht.
+
+Die Zahlen in `llm_calls` sind eine **Schätzung** dieser Seite. Damit man der Schätzung trauen kann, trägt jeder Preis in
+`config/settings.toml` seine Herkunft und sein Prüfdatum, und jede gebuchte
+Zeile hält fest, mit welchem Preis sie gerechnet wurde — eine Preisänderung
+verfälscht also keine alten Zeilen. Bepreist wird das Modell, das tatsächlich
+geantwortet hat; kennt die Tabelle es nicht, bucht die Zeile 0 und ist als
+`price_source = "unknown"` markiert, dazu ein ERROR im Log. Zwischengespeicherte
+Eingaben werden mit ihren eigenen Faktoren gerechnet (Lesen etwa 0,1×,
+Schreiben 1,25×). Ist ein Preis älter als drei Monate, sagt der Worker das beim
+Start (`llm.prices_stale`).
+
 ### Modell wechseln
 
-Welche Modelle laufen, steht in `config/settings.toml` unter `[llm]`
-(`model_summary`, `model_sentiment`) und in jeder Worker-Log-Zeile `llm.models`
-beim Start; jeder Aufruf loggt als `llm.call` das Modell, das tatsächlich
-geantwortet hat, mit Token und Kosten. Zum Wechseln drei Stellen, zusammen:
+Drei Schritte, und die Preise ziehen automatisch nach:
 
-1. `config/settings.toml`: `model_summary`/`model_sentiment` und ein Preis-Eintrag
-   unter `[llm.prices_per_million_tokens]` (ohne ihn startet die App nicht).
-2. `config/bifrost.json`: den Modellnamen beim Key (`models`) und beim Virtual
-   Key (`allowed_models`) — der Gateway lässt nur durch, was dort steht.
+1. In `config/settings.toml` `model_summary`/`model_sentiment` ändern und den
+   Preis-Eintrag mit Herkunft und Prüfdatum ergänzen (fehlt er, startet die App
+   nicht).
+2. `uv run app gateway-config` — schreibt dieselben Modellnamen in die
+   Gateway-Konfiguration, damit niemand sie doppelt pflegt.
 3. `docker compose up -d --force-recreate bifrost`, Worker neu starten.
 
-`uv run pytest` prüft, dass die beiden Dateien zusammenpassen. Ist ein Modell
-beim Anbieter abgeschaltet oder im Gateway nicht freigegeben, schreibt der Worker
-`operator.action_needed` mit Modellname, der Meldung des Anbieters und genau
-diesen Stellen; kein Video geht dabei verloren.
+Alte Preis-Einträge bleiben stehen: Buchungen von vorher wurden mit ihnen
+gerechnet und sollen erklärbar bleiben. Vorher vergleichen lohnt sich:
+`uv run app eval-prompts --model anthropic/<modell> --out out/eval` rendert
+dieselben Beispiel-Transkripte mit beiden Modellen nebeneinander, mit Token und
+Kosten.
 
 `.env` ist git-ignoriert. Jede Tabelle aus `config/settings.toml` lässt sich per
 Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
@@ -135,6 +162,7 @@ Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
 | Pfad | Inhalt |
 |---|---|
 | `config/settings.toml` | Alle Stellschrauben, kommentiert |
+| `src/app/design.py` | Jede Farbe und Schriftgröße — Seiten und Mails lesen dieselben Werte |
 | `.env.example` | Alle Geheimnisse, je eines mit Kommentar |
 | `src/app/` | `sources/` → `transcripts/` → `analysis/` → `delivery/`, dazu `jobs/` (Pipeline), `web/`, `worker.py` |
 | `tests/` | Unit- und Integrationstests, Fakes in `fakes.py` |
@@ -154,9 +182,16 @@ das Stimmungsbild, eine Stunde vorher bekommt der Creator die Vorschau mit
 bestätigten Fans. Der Durchlauf ist am 19.09.2026 einmal vollständig gegen die
 echten Dienste gelaufen: YouTube, Transkript, Zusammenfassung, Stimmungsbild,
 Vorschau und Versand an zwei Test-Adressen, genau einmal.
+Danach wurde M6 nach einem Code-Review gehärtet (19 Befunde, darunter ein still
+verworfener Commit nach einem Datenbankfehler und ein Versand, der trotz
+Erfolgs als gescheitert enden konnte).
+
 Es fehlen **M7 bis M9**: Einstellungsseite, Verkaufsseite, Deployment; der echte
-Bounce-Webhook wird mit dem Deployment abgenommen (M9). Fortschritt je
-Meilenstein in §17 des Plans.
+Bounce-Webhook wird mit dem Deployment abgenommen (M9). Ebenfalls offen und
+bewusst nicht gebaut: **wie das Geld fließt.** Der MVP sieht laut Manifest §4.4
+einen Vertrag und eine Rechnung von Hand vor; was ein einzelner Kunde kostet,
+lässt sich aus `llm_calls` und `deliveries` ableiten (siehe `docs/backlog.md`).
+Fortschritt je Meilenstein in §17 des Plans.
 
 Sprache: Code, Kommentare und Logs auf Englisch; diese Datei und alles, was Fans
 und Creator sehen, auf Deutsch.

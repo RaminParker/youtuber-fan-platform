@@ -18,8 +18,10 @@ process and the worker write the same row safely.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import func, literal, select, text, update
@@ -221,6 +223,9 @@ def send_preview(
     """
     schedule = settings.schedule
     send_at = max(mailing.send_at, now + timedelta(minutes=schedule.stop_window_minutes))
+    if not _hold_the_send_time(session, mailing, send_at):
+        return False
+
     snapshot = snapshot_of(creator, effective_settings(creator, settings).email_variant)
     render = compose(session, appearance, creator, settings, snapshot=snapshot)
     preview = render(
@@ -229,8 +234,8 @@ def send_preview(
         send_at=send_at,
         recipient_count=recipient_count(session, creator.id),
         postpone_until=postponed_send_at(send_at, appearance.published_at, schedule),
-        idempotency_key=f"preview/{mailing.id}/{mailing.stop_token}",
     )
+    preview = replace(preview, idempotency_key=_preview_key(mailing, preview))
     get_services().email.send(preview)
 
     won = _transition(
@@ -238,7 +243,6 @@ def send_preview(
         mailing.id,
         {MailingStatus.SENTIMENT_READY},
         MailingStatus.PREVIEW_SENT,
-        send_at=send_at,
         preview_sent_at=now,
         render_snapshot=snapshot,
         **FRESH,
@@ -246,6 +250,40 @@ def send_preview(
     if won:
         logger.info(log.MAILING_PREVIEW_SENT, mailing_id=mailing.id, send_at=send_at)
     return won
+
+
+def _hold_the_send_time(session: Session, mailing: Mailing, send_at: datetime) -> bool:
+    """Write the send time the preview is about to announce, and commit it.
+
+    A late tick pushes the send so the creator keeps a full stop window. If
+    that push lived only in memory, a retried preview would announce a later
+    time than the first attempt — the same idempotency key with a different
+    body, which is exactly the case the provider does not document.
+    """
+    if send_at != mailing.send_at:
+        moved = session.execute(
+            update(Mailing)
+            .where(Mailing.id == mailing.id, Mailing.status == MailingStatus.SENTIMENT_READY)
+            .values(send_at=send_at)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if not moved:
+            logger.info(log.MAILING_TRANSITION_LOST, mailing_id=mailing.id, wanted="send_at")
+            return False
+    session.commit()
+    return True
+
+
+def _preview_key(mailing: Mailing, preview: OutgoingEmail) -> str:
+    """Key a preview by its mailing, its schedule and its content.
+
+    A repeat of the same preview is recognised and delivered once. A preview
+    whose content has changed — a fan signed up between two attempts — is a
+    different key and simply arrives: a second preview costs the creator a
+    glance, a key with two bodies costs a guarantee.
+    """
+    fingerprint = hashlib.sha256(f"{preview.html}{preview.text}".encode()).hexdigest()[:12]
+    return f"preview/{mailing.id}/{mailing.stop_token}/{fingerprint}"
 
 
 def start_sending(session: Session, mailing_id: int, creator_id: int) -> bool:
@@ -296,6 +334,10 @@ def send_batches(
             .where(Delivery.id.in_([delivery_id for delivery_id, _ in batch]))
             .values(sent_at=now)
         )
+        # A batch that went through is progress, and the retry ladder counts
+        # against progress, not against a lifetime (plan §9.4). Without this a
+        # long list dies of ten scattered hiccups with most of it unsent.
+        session.execute(update(Mailing).where(Mailing.id == mailing.id).values(**FRESH))
         session.commit()
         logger.info(
             log.MAILING_BATCH_SENT,
@@ -304,7 +346,11 @@ def send_batches(
             first_delivery_id=first_id,
         )
 
-    total = session.scalar(select(func.count()).where(Delivery.mailing_id == mailing.id))
+    # What was sent, not what was planned: a recipient blocked mid-send never
+    # received this mail and must not be counted as if they had.
+    total = session.scalar(
+        select(func.count()).where(Delivery.mailing_id == mailing.id, Delivery.sent_at.is_not(None))
+    )
     if _transition(
         session,
         mailing.id,
@@ -315,6 +361,10 @@ def send_batches(
         **FRESH,
     ):
         logger.info(log.MAILING_SENT, mailing_id=mailing.id, recipients=total)
+    # Committed here, inside the lock, not by the caller: releasing the lock is
+    # the one step left that can still fail, and a finished send must not be
+    # undone by it.
+    session.commit()
 
 
 def _pending(session: Session, mailing_id: int) -> list[tuple[int, Subscription]]:
@@ -323,7 +373,15 @@ def _pending(session: Session, mailing_id: int) -> list[tuple[int, Subscription]
         session.execute(
             select(Delivery.id, Subscription)
             .join(Subscription, Subscription.id == Delivery.subscription_id)
-            .where(Delivery.mailing_id == mailing_id, Delivery.sent_at.is_(None))
+            .join(Subscriber, Subscriber.id == Subscription.subscriber_id)
+            .where(
+                Delivery.mailing_id == mailing_id,
+                Delivery.sent_at.is_(None),
+                # Re-read on every batch: a bounce or a complaint that lands
+                # mid-send must stop the rest. Their rows stay unsent, which is
+                # what the ledger should say about them.
+                Subscriber.blocked_at.is_(None),
+            )
             .order_by(Delivery.id)
             .limit(BATCH_SIZE)
         ).tuples()
@@ -356,8 +414,11 @@ def exclusive(mailing_id: int) -> Iterator[bool]:
                 connection.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": mailing_id})
                 connection.commit()
         except Exception:
+            # Throwing the connection away releases the lock with it. Raising
+            # here would replace whatever the send reported — a finished send
+            # with a database error, or a real error with this one.
             connection.invalidate()
-            raise
+            logger.exception(log.MAILING_UNLOCK_FAILED, mailing_id=mailing_id)
         finally:
             connection.close()
 

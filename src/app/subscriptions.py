@@ -146,7 +146,8 @@ def send_confirm_mail(creator: Creator, due: ConfirmMail) -> None:
     link = f"{settings.base_url}/k/{creator.slug}/bestaetigen/{due.token}"
     try:
         get_services().email.send(render_confirm_mail(creator, due.address, link, settings))
-    except Exception:
+    except Exception as error:
+        log.report_operator_action(error, subscription_id=due.subscription_id)
         logger.exception(log.SUBSCRIPTION_CONFIRM_FAILED, subscription_id=due.subscription_id)
         _release_throttle(due)
         return

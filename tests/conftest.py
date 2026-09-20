@@ -16,9 +16,11 @@ from alembic.config import Config
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session
 
+from app import log
 from app.config import REPO_ROOT, Secrets, Settings, get_settings
 from app.db import engine as db_engine
 from app.db.models import Base
+from app.jinja import get_jinja
 from app.services import set_services
 from app.web.limits import limiter
 from tests.fakes import FakeEmailClient
@@ -44,11 +46,15 @@ def clean_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # depends on the network is not a test. The DNS path has its own unit tests.
     monkeypatch.setenv("WEB__CHECK_ADDRESS_DNS", "false")
     get_settings.cache_clear()
+    # The environment freezes base_url and the product name when it is built,
+    # so a stale one makes rendered links depend on the order tests ran in.
+    get_jinja.cache_clear()
     # The rate limiter counts per address in process memory, and every test
     # arrives from the same one. Without this, test number four is throttled.
     limiter.reset()
     yield
     get_settings.cache_clear()
+    get_jinja.cache_clear()
     db_engine.reset_engine()
 
 
@@ -140,6 +146,33 @@ def committed_database(
         with migrated_engine.begin() as connection:
             connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
         db_engine.reset_engine()
+
+
+@pytest.fixture
+def logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Read the worker's log lines, and leave logging as it was found.
+
+    ``configure_logging`` is process-global: it rebuilds structlog's processor
+    chain and replaces the root handlers — including the one ``caplog`` just
+    installed. So the handler is put back for this test, and the whole setup is
+    restored afterwards, or the test that runs next inherits a logging
+    configuration it never asked for.
+    """
+    import logging
+
+    import structlog
+
+    root = logging.getLogger()
+    before = list(root.handlers), root.level, structlog.get_config()
+    log.configure_logging(get_settings())
+    root.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        handlers, level, config = before
+        root.handlers = handlers
+        root.setLevel(level)
+        structlog.configure(**config)
 
 
 @pytest.fixture

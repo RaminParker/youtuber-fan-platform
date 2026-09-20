@@ -8,6 +8,7 @@ overridable with a double underscore, e.g. ``LOGGING__JSON=true``.
 from __future__ import annotations
 
 import functools
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -64,10 +65,18 @@ class CommentSettings(BaseModel):
 
 
 class ModelPrice(BaseModel):
-    """Price of one model in currency units per million tokens."""
+    """Price of one model in currency units per million tokens.
+
+    ``source`` and ``checked_on`` are not decoration: a customer's price is
+    calculated from these numbers, and nobody can trust a figure whose origin
+    and age are unknown. The provider's invoice remains the authority; this is
+    an estimate that has to be able to say how old it is.
+    """
 
     input: float
     output: float
+    source: str
+    checked_on: date
 
 
 class LLMSettings(BaseModel):
@@ -80,6 +89,10 @@ class LLMSettings(BaseModel):
     daily_cost_cap_cents: int
     summary_prompt_version: str
     sentiment_prompt_version: str
+    #: Where the provider shows what was actually spent. Our ledger is an
+    #: estimate; this page is the invoice, and it belongs next to every figure
+    #: we print so nobody has to take our arithmetic on faith.
+    usage_dashboard: str
     prices_per_million_tokens: dict[str, ModelPrice]
 
     # "model_" is pydantic's own namespace; our fields are configuration, not models.

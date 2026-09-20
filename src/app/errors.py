@@ -1,9 +1,16 @@
-"""The one error the worker treats as "try again later".
+"""How the worker is told what kind of trouble it is in.
 
-Every layer subclasses it — the YouTube client, the OAuth client, the transcript
-providers, the mail client's quota error. The worker catches exactly this type,
-counts an attempt and schedules a retry; anything else is a bug or a permanent
-condition that its step has already mapped to a terminal status.
+Three answers, and the row's fate follows from which one it gets:
+
+- :class:`TemporaryError` — try again later. Every layer subclasses it: the
+  YouTube client, the OAuth client, the transcript providers, the mail client.
+  It costs an attempt, and ten of them end the row.
+- :class:`NeedsOperator` — a key or a plan; only a person can fix it. It costs
+  no attempt and never ends a row on its own.
+- :class:`CostCapExceeded` — the budget for today; only the clock fixes it.
+
+Anything else is a bug or a permanent condition its step has already mapped to
+a terminal status.
 """
 
 from __future__ import annotations

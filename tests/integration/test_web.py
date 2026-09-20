@@ -112,3 +112,26 @@ class TestHostileInput:
         response = client.post(path, content=b"x" * 100_000)
 
         assert response.status_code == 413
+
+
+class TestAnUnknownAddress:
+    """A wrong link is the most common way to meet this product.
+
+    It must not answer with the framework's raw JSON: whoever sees that has
+    left the product without noticing, which is exactly the impression a fan
+    page cannot afford.
+    """
+
+    def test_it_gets_the_branded_page_not_raw_json(self, client):
+        answer = client.get("/gibtsnicht")
+
+        assert answer.status_code == 404
+        assert "text/html" in answer.headers["content-type"]
+        assert "Diese Seite gibt es nicht" in answer.text
+        assert "detail" not in answer.text
+
+    def test_the_health_check_still_speaks_json(self, client):
+        # Machines read this one; it must not turn into a page.
+        answer = client.get("/health")
+
+        assert answer.json() == {"status": "ok"}

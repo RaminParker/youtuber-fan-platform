@@ -5,12 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ product.name }}{% endblock %}</title>
   {% block head %}{% endblock %}
+  {# The values come from app/design.py, the rules from the stylesheet: one
+     source for what the product looks like, in both light and dark. #}
+  <style>
+    :root { {{ design.variables(design.light) | safe }} {{ design.type_variables() | safe }} }
+    @media (prefers-color-scheme: dark) { :root { {{ design.variables(design.dark) | safe }} } }
+  </style>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  {# A fan page wears its creator's colour; every other page, ours. #}
-  {% set accent = creator.accent_color if creator is defined and creator else '#333333' %}
-  <main class="page" style="--accent: {{ accent }}; --accent-ink: {{ ink_on(accent) }};
+  {# A fan page wears its creator's colour; every other page, ours. Only the
+     versions that have to be read or seen are derived (app/branding.py). #}
+  {% set accent = creator.accent_color if creator is defined and creator else design.default_accent %}
+  {% set surface = surface_on_light(accent) %}
+  {% set surface_dark = surface_on_dark(accent) %}
+  <main class="page" style="--accent: {{ surface }}; --accent-dark: {{ surface_dark }};
+    --accent-ink: {{ ink_on(surface) }}; --accent-ink-dark: {{ ink_on(surface_dark) }};
     --link: {{ link_on_light(accent) }}; --link-dark: {{ link_on_dark(accent) }}">
     {% block content %}{% endblock %}
   </main>
