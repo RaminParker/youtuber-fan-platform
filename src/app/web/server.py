@@ -13,11 +13,11 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import log
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, missing_secrets
 from app.jinja import TEMPLATE_DIR, render_partial
 from app.web.limits import limiter
 from app.web.pages import error_page, is_htmx, not_found
-from app.web.routes import creator, fan, public, webhooks
+from app.web.routes import creator, fan, mailings, public, webhooks
 
 STATIC_DIR = TEMPLATE_DIR.parent / "static"
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -77,6 +77,13 @@ async def handle_request_id(
     return response
 
 
+#: What the web process cannot do without each secret; checked once at start.
+NEEDED_SECRETS = {
+    "RESEND_API_KEY": "no confirm mail and no login link can be sent",
+    "RESEND_WEBHOOK_SECRET": "every bounce webhook is refused (401), so bounces block nobody",
+}
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application.
 
@@ -87,6 +94,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     settings = settings or get_settings()
     log.configure_logging(settings)
+    for name, consequence in missing_secrets(settings, NEEDED_SECRETS).items():
+        logger.error(log.CONFIG_SECRET_MISSING, name=name, consequence=consequence)
 
     app = FastAPI(title=settings.product.name, docs_url=None, redoc_url=None, openapi_url=None)
     # Added first, so it sits innermost, right above the routes: the function
@@ -112,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(public.router)
     app.include_router(fan.router)
     app.include_router(creator.router)
+    app.include_router(mailings.router)
     app.include_router(webhooks.router)
 
     return app

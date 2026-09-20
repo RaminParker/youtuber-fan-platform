@@ -30,6 +30,7 @@ TRANSCRIPT_UNAVAILABLE = "transcript.unavailable"
 
 LLM_CALL = "llm.call"
 LLM_COST_CAP_HIT = "llm.cost_cap_hit"
+LLM_MODELS = "llm.models"
 
 MAILING_SCHEDULED = "mailing.scheduled"
 MAILING_SENTIMENT_READY = "mailing.sentiment_ready"
@@ -43,6 +44,7 @@ MAILING_RESCHEDULED = "mailing.rescheduled"
 MAILING_CANCELLED = "mailing.cancelled"
 MAILING_FAILED = "mailing.failed"
 MAILING_TRANSITION_LOST = "mailing.transition_lost"
+MAILING_SEND_LOCKED = "mailing.send_locked"
 
 SUBSCRIPTION_CREATED = "subscription.created"
 SUBSCRIPTION_CONFIRMED = "subscription.confirmed"
@@ -61,7 +63,6 @@ OAUTH_CONNECTED = "oauth.connected"
 OAUTH_REVOKED = "oauth.revoked"
 
 EMAIL_REFUSED = "email.refused"
-EMAIL_QUOTA_EXHAUSTED = "email.quota_exhausted"
 
 WEBHOOK_RESEND = "webhook.resend"
 WEBHOOK_SECRET_UNUSABLE = "webhook.secret_unusable"
@@ -71,6 +72,10 @@ WEB_RATE_LIMITED = "web.rate_limited"
 
 FEED_POLLED = "feed.polled"
 CLEANUP_DONE = "cleanup.done"
+CLEANUP_RECHECK_FAILED = "cleanup.recheck_failed"
+
+OPERATOR_ACTION_NEEDED = "operator.action_needed"
+CONFIG_SECRET_MISSING = "config.secret_missing"
 
 WORKER_STARTED = "worker.started"
 WORKER_STOPPING = "worker.stopping"

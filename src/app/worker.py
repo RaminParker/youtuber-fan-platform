@@ -24,15 +24,36 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app import log
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, missing_secrets
 from app.db.engine import session_scope
-from app.db.models import Appearance, AppearanceStatus, Creator, NoticeKind, Source
-from app.errors import CostCapExceeded, TemporaryError
+from app.db.models import (
+    Appearance,
+    AppearanceStatus,
+    Creator,
+    Mailing,
+    MailingStatus,
+    NoticeKind,
+    Source,
+)
+from app.delivery import mailing as mailings
+from app.errors import CostCapExceeded, NeedsOperator, TemporaryError
 from app.jobs import steps
-from app.jobs.schedule import WAIT_FOR_THE_WORLD, has_attempts_left, retry_at
+from app.jobs.schedule import (
+    PREPARE_SENTIMENT,
+    SEND,
+    SEND_PREVIEW,
+    WAIT_FOR_THE_WORLD,
+    has_attempts_left,
+    next_mailing_step,
+    retry_at,
+)
 
 #: How much of an exception message the row keeps for the operator.
 ERROR_LENGTH = 2000
+
+#: How often a row blocked by a key or a plan asks again. Short, so a fixed key
+#: is picked up within the hour; every ask logs at ERROR, so it stays loud.
+WAIT_FOR_THE_OPERATOR = timedelta(hours=1)
 
 logger = log.get_logger(__name__)
 
@@ -42,6 +63,15 @@ APPEARANCE_STEPS: dict[str, Callable[[Session, int, datetime], None]] = {
     AppearanceStatus.DETECTED: steps.enrich,
     AppearanceStatus.ENRICHED: steps.transcribe,
     AppearanceStatus.TRANSCRIBED: steps.summarize,
+}
+
+#: What the worker cannot do without each secret. Checked once at start, so a
+#: missing key is an ERROR in the first log lines, not a surprise at the first video.
+NEEDED_SECRETS = {
+    "YOUTUBE_API_KEY": "new videos cannot be checked and no send can re-check its video",
+    "LLM_GATEWAY_URL": "nothing can be summarised",
+    "LLM_GATEWAY_KEY": "nothing can be summarised",
+    "RESEND_API_KEY": "no preview, no fan mail, no creator notice can be sent",
 }
 
 _stopping = False
@@ -115,6 +145,10 @@ def record_outcome(appearance_id: int, now: datetime, error: Exception) -> None:
         if appearance is None:
             return
 
+        if isinstance(error, NeedsOperator):
+            park_for_the_operator(appearance, error, now)
+            return
+
         if isinstance(error, CostCapExceeded):
             appearance.next_attempt_at = now + WAIT_FOR_THE_WORLD
             logger.warning(log.LLM_COST_CAP_HIT, error=str(error))
@@ -137,6 +171,24 @@ def record_outcome(appearance_id: int, now: datetime, error: Exception) -> None:
             logger.exception(log.ITEM_FAILED)
 
         _give_up(session, appearance, error)
+
+
+def park_for_the_operator(row: Appearance | Mailing, error: NeedsOperator, now: datetime) -> None:
+    """Wait for a person to fix a key or a plan — without counting an attempt.
+
+    The row keeps its place and its attempts; nobody but the operator is told.
+    The log line carries everything needed to fix it: which service, what it
+    said, and which setting to check.
+    """
+    row.next_attempt_at = now + WAIT_FOR_THE_OPERATOR
+    row.last_error = str(error)[:ERROR_LENGTH]
+    logger.error(
+        log.OPERATOR_ACTION_NEEDED,
+        service=error.service,
+        problem=error.problem,
+        fix=error.fix,
+        retry_at=row.next_attempt_at,
+    )
 
 
 def _give_up(session: Session, appearance: Appearance, error: Exception) -> None:
@@ -168,6 +220,109 @@ def run_due_steps(now: datetime) -> int:
             # the others their turn.
             logger.exception(log.WORKER_STEP_CRASHED, appearance_id=appearance_id)
     return len(due)
+
+
+#: Which function runs which mailing step; ``next_mailing_step`` picks the name.
+MAILING_STEPS: dict[str, Callable[[Session, int, datetime], None]] = {
+    PREPARE_SENTIMENT: steps.prepare_sentiment,
+    SEND_PREVIEW: steps.send_preview,
+    SEND: steps.send,
+}
+
+#: States a mailing can still move on from.
+MAILING_OPEN = (
+    MailingStatus.SCHEDULED,
+    MailingStatus.SENTIMENT_READY,
+    MailingStatus.PREVIEW_SENT,
+    MailingStatus.SENDING,
+)
+
+
+def due_mailings(session: Session, now: datetime, settings: Settings) -> list[tuple[int, str]]:
+    """Return the id and step of every mailing with something to do at ``now``."""
+    candidates = session.scalars(
+        select(Mailing)
+        .where(
+            Mailing.status.in_(MAILING_OPEN),
+            or_(Mailing.next_attempt_at.is_(None), Mailing.next_attempt_at <= now),
+        )
+        .order_by(Mailing.id)
+    )
+    due = []
+    for mailing in candidates:
+        step = next_mailing_step(mailing, now, settings.schedule)
+        if step is not None:
+            due.append((mailing.id, step))
+    return due
+
+
+def run_due_mailings(now: datetime, settings: Settings) -> int:
+    """Run every mailing step that is due, each in its own transaction."""
+    with session_scope() as session:
+        due = due_mailings(session, now, settings)
+    for mailing_id, step in due:
+        log.bind(mailing_id=mailing_id, step=step)
+        try:
+            with session_scope() as session:
+                MAILING_STEPS[step](session, mailing_id, now)
+        except Exception as error:
+            try:
+                record_mailing_outcome(mailing_id, now, error)
+            except Exception:
+                logger.exception(log.WORKER_STEP_CRASHED, mailing_id=mailing_id)
+        finally:
+            log.clear_context()
+    return len(due)
+
+
+def record_mailing_outcome(mailing_id: int, now: datetime, error: Exception) -> None:
+    """Retry a failed mailing step, or give the mailing up and tell the creator.
+
+    The status is read again rather than remembered: a send that failed in its
+    second batch is already ``sending``, and that decides what the creator is
+    told. The notice goes out only after the ``failed`` state is committed, and
+    only if this call is the one that wrote it — never from a path that could
+    still roll back.
+    """
+    notice = None
+    with session_scope() as session:
+        mailing = session.get(Mailing, mailing_id)
+        if mailing is None or mailing.status not in MAILING_OPEN:
+            return
+        if isinstance(error, NeedsOperator):
+            park_for_the_operator(mailing, error, now)
+            return
+        mailing.last_error = f"{type(error).__name__}: {error}"[:ERROR_LENGTH]
+        if isinstance(error, TemporaryError):
+            mailing.attempts += 1
+            if has_attempts_left(mailing.attempts):
+                mailing.next_attempt_at = retry_at(mailing.attempts, now)
+                logger.warning(
+                    log.STEP_RETRY,
+                    attempt=mailing.attempts,
+                    next_attempt_at=mailing.next_attempt_at,
+                    error=str(error),
+                )
+                return
+        else:
+            logger.exception(log.MAILING_FAILED, mailing_id=mailing_id)
+
+        status = mailing.status
+        if mailings.fail(session, mailing_id, status):
+            notice = _failure_notice(session, mailing, status)
+    if notice is not None:
+        creator, kind, context = notice
+        steps.notify_creator(creator, kind, **context)
+
+
+def _failure_notice(session: Session, mailing: Mailing, status: str):
+    """Say what a failed mailing means for the fans: nothing went out, or maybe some did."""
+    appearance = session.get(Appearance, mailing.appearance_id)
+    source = session.get(Source, appearance.source_id)
+    creator = session.get(Creator, source.creator_id)
+    started = status in (MailingStatus.PREVIEW_SENT, MailingStatus.SENDING)
+    kind = NoticeKind.SEND_FAILED if started else NoticeKind.PREVIEW_FAILED
+    return creator, kind, {"video_title": appearance.title, "appearance_id": appearance.id}
 
 
 #: The manifest's retention periods are days; a daily sweep honours them.
@@ -223,7 +378,7 @@ def run_tick(now: datetime, settings: Settings | None = None) -> None:
     started = time.monotonic()
     # Due work first, periodic jobs second, as the plan specifies: a failing
     # poll must never cost the pipeline its tick.
-    ran = run_due_steps(now)
+    ran = run_due_steps(now) + run_due_mailings(now, settings)
     run_periodic_jobs(now, settings)
     logger.info(log.WORKER_TICK, due=ran, duration_ms=round((time.monotonic() - started) * 1000))
 
@@ -236,6 +391,16 @@ def main() -> None:
     signal.signal(signal.SIGINT, handle_stop_signal)
 
     logger.info(log.WORKER_STARTED, loop_seconds=settings.worker.loop_seconds)
+    # Models change often; the first lines of every worker log say which ones run.
+    logger.info(
+        log.LLM_MODELS,
+        summary=settings.llm.model_summary,
+        sentiment=settings.llm.model_sentiment,
+        summary_prompt=settings.llm.summary_prompt_version,
+        sentiment_prompt=settings.llm.sentiment_prompt_version,
+    )
+    for name, consequence in missing_secrets(settings, NEEDED_SECRETS).items():
+        logger.error(log.CONFIG_SECRET_MISSING, name=name, consequence=consequence)
     while not _stopping:
         started = time.monotonic()
         try:

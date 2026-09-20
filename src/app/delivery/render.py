@@ -212,6 +212,24 @@ NOTICES = {
         ),
         what_now="Du musst nichts tun — wir melden uns, wenn wir mehr wissen.",
     ),
+    NoticeKind.PREVIEW_FAILED: Notice(
+        subject="Eine Vorschau kam nicht bei dir an — die Mail geht nicht raus",
+        headline="Die Vorschau konnte nicht verschickt werden",
+        explanation=(
+            "Wir haben es mehrfach versucht. Ohne Vorschau hättest du keine Möglichkeit, "
+            "die Mail zu stoppen — deshalb geht sie nicht an deine Abonnenten."
+        ),
+        what_now="Du musst nichts tun — wir melden uns, wenn wir mehr wissen.",
+    ),
+    NoticeKind.SEND_FAILED: Notice(
+        subject="Der Versand einer Zusammenfassung ist hängen geblieben",
+        headline="Der Versand an deine Abonnenten ist nicht fertig geworden",
+        explanation=(
+            "Ein Teil deiner Abonnenten hat die Mail womöglich schon bekommen. Wir "
+            "kümmern uns darum, dass der Rest sie bekommt — doppelt bekommt sie niemand."
+        ),
+        what_now="Du musst nichts tun — wir melden uns, wenn wir mehr wissen.",
+    ),
 }
 
 
@@ -271,6 +289,8 @@ def render_summary_mail(
     variant: str | None = None,
     stop_token: str = "",
     send_at=None,
+    recipient_count: int = 0,
+    postpone_until=None,
     idempotency_key: str | None = None,
 ) -> OutgoingEmail:
     """Build the mail a fan receives — or the preview of it the creator gets.
@@ -300,7 +320,8 @@ def render_summary_mail(
         "preview": preview,
         "stop_token": stop_token,
         "send_at": send_at,
-        "postpone_hours": settings.schedule.postpone_hours,
+        "recipient_count": recipient_count,
+        "postpone_until": postpone_until,
     }
     subject = f"{rendered_as.name}: {appearance.title}"
     html, text = render_pair("summary", rendered_as, subject, **context)

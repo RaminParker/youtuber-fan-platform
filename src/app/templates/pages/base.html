@@ -9,7 +9,9 @@
 </head>
 <body>
   {# A fan page wears its creator's colour; every other page, ours. #}
-  <main class="page" style="--accent: {{ creator.accent_color if creator is defined and creator else '#333333' }}">
+  {% set accent = creator.accent_color if creator is defined and creator else '#333333' %}
+  <main class="page" style="--accent: {{ accent }}; --accent-ink: {{ ink_on(accent) }};
+    --link: {{ link_on_light(accent) }}; --link-dark: {{ link_on_dark(accent) }}">
     {% block content %}{% endblock %}
   </main>
 </body>

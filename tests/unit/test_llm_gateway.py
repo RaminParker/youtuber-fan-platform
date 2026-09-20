@@ -1,14 +1,16 @@
 """The gateway: structured output, one retry, and the money it costs."""
 
+import json
 from decimal import Decimal
 
 import httpx
 import pytest
 
 from app.analysis.llm import BifrostGateway, LLMError, LLMTemporaryError, cost_cents, day_start
-from app.analysis.schemas import Sentiment
+from app.analysis.schemas import Sentiment, Summary
 from app.config import get_settings
 from app.errors import TemporaryError
+from tests.fakes import _default_for
 
 VALID = Sentiment(overall="Gemischt.", agreed=[], disagreed=[], questions=[], comment_count_used=3)
 
@@ -162,3 +164,33 @@ class TestDayBoundary:
 
         assert (start.year, start.month, start.day) == (2026, 9, 12)
         assert (start.hour, start.minute) == (0, 0)
+
+
+def objects_in(schema: dict):
+    """Every object node of a JSON schema, including the ones under $defs."""
+    if isinstance(schema, dict):
+        if schema.get("type") == "object":
+            yield schema
+        for value in schema.values():
+            yield from objects_in(value)
+    elif isinstance(schema, list):
+        for item in schema:
+            yield from objects_in(item)
+
+
+class TestTheSchemaTheProviderAccepts:
+    """Found live on 2026-09-19: the provider refuses a strict schema whose
+    objects do not say ``additionalProperties: false`` — every summary failed."""
+
+    @pytest.mark.parametrize("model", [Summary, Sentiment])
+    def test_every_object_forbids_additional_properties(self, model):
+        gateway, seen = gateway_answering(_default_for(model).model_dump_json())
+
+        gateway.complete_json(
+            model="anthropic/claude-sonnet-4-5", system="s", user="u", schema=model, max_tokens=10
+        )
+
+        schema = json.loads(seen[0].content)["response_format"]["json_schema"]["schema"]
+        objects = list(objects_in(schema))
+        assert len(objects) > 1 if model is Summary else objects
+        assert all(node.get("additionalProperties") is False for node in objects)

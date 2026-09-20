@@ -18,7 +18,7 @@ import httpx
 
 from app import log
 from app.delivery.render import OutgoingEmail
-from app.errors import TemporaryError
+from app.errors import NeedsOperator, TemporaryError
 
 API_BASE = "https://api.resend.com"
 TIMEOUT_SECONDS = 30
@@ -37,12 +37,15 @@ class EmailTemporaryError(TemporaryError):
     """The provider was unwell or rate-limited. Worth trying again."""
 
 
-class QuotaExhausted(EmailTemporaryError):
+SERVICE = "Resend"
+
+
+class QuotaExhausted(NeedsOperator):
     """The daily or monthly send allowance is used up.
 
-    Temporary in the sense that tomorrow it will not be, but it needs an
-    operator rather than patience — the retry ladder is not going to fix a plan
-    limit.
+    Tomorrow it will not be, but it needs an operator rather than patience —
+    the retry ladder is not going to fix a plan limit, and must not spend a
+    mailing's attempts waiting for one.
     """
 
 
@@ -103,6 +106,13 @@ class ResendClient:
             raise _rate_limit_error(response)
         if response.status_code >= 500:
             raise EmailTemporaryError(f"HTTP {response.status_code}")
+        if response.status_code in (401, 403):
+            raise NeedsOperator(
+                SERVICE,
+                f"request refused (HTTP {response.status_code}): {response.text[:300]}",
+                "check RESEND_API_KEY (sending access) and SENDER_ADDRESS; without a verified "
+                "domain Resend only delivers to the account's own address and its test addresses",
+            )
         logger.error(log.EMAIL_REFUSED, status=response.status_code, body=response.text[:500])
         raise EmailError(f"HTTP {response.status_code}: {response.text[:200]}")
 
@@ -143,19 +153,22 @@ class ResendClient:
         self._raise_for(response)
 
 
-def _rate_limit_error(response: httpx.Response) -> EmailTemporaryError:
+def _rate_limit_error(response: httpx.Response) -> Exception:
     """Tell a passing rate limit apart from an exhausted plan.
 
     Both arrive as 429. The first clears in a second; the second needs somebody
-    to notice, so it is logged at error level and named differently.
+    to act, so it becomes a :class:`QuotaExhausted` that names the plan limit.
     """
     try:
         name = response.json().get("name", "")
     except ValueError:
         name = ""
     if name in ("daily_quota_exceeded", "monthly_quota_exceeded"):
-        logger.error(log.EMAIL_QUOTA_EXHAUSTED, name=name)
-        return QuotaExhausted(name)
+        return QuotaExhausted(
+            SERVICE,
+            f"sending plan exhausted ({name})",
+            "wait for the reset or upgrade the Resend plan; test mails count too",
+        )
     return EmailTemporaryError(f"rate limited: {name or 'unknown'}")
 
 

@@ -67,23 +67,39 @@ Diese Befehle nehmen auf und berichten — Pipeline-Schritte führt nur der
 Worker aus. Sie sprechen mit YouTube beziehungsweise dem LLM-Gateway; ohne den
 passenden Schlüssel brechen sie mit einer Meldung ab, die sagt, welcher fehlt.
 
-## Schlüssel
+## Schlüssel und ihre Rechte
 
-Pflicht zum Start sind nur `DATABASE_URL` und `SECRET_KEY`; beide stehen mit
-Werten für die lokale Entwicklung in `.env.example`. Die übrigen braucht die
-Schicht, die sie benutzt:
+`.env.example` zeigt alle Variablen, gruppiert danach, wann sie gebraucht
+werden; `cp .env.example .env` und ausfüllen. Pflicht zum Start sind nur
+`DATABASE_URL` und `SECRET_KEY`. Fehlt ein Schlüssel, den ein Prozess braucht,
+steht beim Start ein ERROR `config.secret_missing` im Log; lehnt ein Anbieter
+einen Schlüssel ab oder ist ein Kontingent aufgebraucht, schreibt der Worker
+bei jedem Versuch `operator.action_needed` — mit Dienst, Meldung des Anbieters
+und der Variable, die zu prüfen ist. Kein Video geht dabei verloren.
 
-| Variable | Wofür | Ohne sie |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | LLM-Gateway | Gateway läuft, lehnt Anfragen aber mit „no keys found" ab |
-| `RESEND_API_KEY` | E-Mail-Versand — ein Key mit „Sending access"; mehr Rechte braucht die App nie | keine Mails |
-| `RESEND_WEBHOOK_SECRET` | Signatur der Bounce- und Beschwerde-Meldungen | jede Meldung wird mit 401 abgewiesen (Resend zeigt das im Dashboard) |
-| `SENDER_ADDRESS` | Absender, solange die Domain bei Resend nicht verifiziert ist: `onboarding@resend.dev` | Absender `post@mail.<domain>`, den Resend ohne Verifizierung ablehnt |
-| `YOUTUBE_API_KEY` | Metadaten, Kommentare | nur der öffentliche Feed funktioniert |
-| `GOOGLE_OAUTH_CLIENT_*` | offizielle Untertitel | nur der inoffizielle Anbieter |
+**Grundregel für jeden statischen Schlüssel:** so wenig Rechte wie möglich, ein
+eigener Schlüssel pro Umgebung (lokal, Render), nie im Chat oder im Repo, nach
+einem Leck sofort widerrufen.
+
+| Variable | Was ist das | Woher | So einschränken | Ohne sie |
+|---|---|---|---|---|
+| `YOUTUBE_API_KEY` | Liest öffentliche Videodaten (Titel, Dauer, Kommentare) | Google Cloud Console → APIs & Services → Credentials → API key | *API restrictions*: nur „YouTube Data API v3"; in Produktion zusätzlich auf die Ausgangs-IPs von Render beschränken | nur der öffentliche Feed; kein Video wird verarbeitet |
+| `ANTHROPIC_API_KEY` | Schlüssel des LLM-Gateways beim Modellanbieter; die App selbst sieht ihn nie | Anthropic Console → Workspace wählen → API Keys | in einem eigenen Workspace nur für diese App anlegen, dort ein Ausgabenlimit setzen; der Schlüssel **muss** zu einem Workspace gehören | Gateway antwortet „no keys found" |
+| `LLM_GATEWAY_KEY` | Gemeinsames Geheimnis zwischen App und Gateway („virtual key") | selbst erzeugen: `openssl rand -hex 32` mit Präfix `sk-bf-` | erlaubt im Gateway nur das eine Modell (`allowed_models` in `config/bifrost.json`); das Gateway ist auf Render nicht öffentlich erreichbar | keine Zusammenfassung |
+| `BIFROST_SETUP_TOKEN` | Einmal-Token für die Admin-Oberfläche des Gateways, die wir nie öffnen | selbst erzeugen: `openssl rand -hex 32` | — | Admin-Oberfläche ohne Schutz |
+| `RESEND_API_KEY` | Versendet Mails | Resend → API Keys | Berechtigung *Sending access* (nicht *Full access*), in Produktion auf die eigene Domain beschränkt | keine Mails |
+| `RESEND_WEBHOOK_SECRET` | Prüft, dass Bounce-Meldungen wirklich von Resend kommen | Resend → Webhooks → Endpoint → Signing secret (`whsec_…`) | ein Secret pro Endpoint | jede Meldung wird mit 401 abgewiesen, Bounces sperren niemanden |
+| `SENDER_ADDRESS` | Absender, solange die Domain bei Resend nicht verifiziert ist: `onboarding@resend.dev` | — | — | Absender `post@mail.<domain>`, den Resend ohne Verifizierung ablehnt |
+| `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` | Damit ein Creator seinen Kanal verbindet und wir seine offiziellen Untertitel lesen | Google Cloud Console → Credentials → OAuth client ID (Webanwendung) | einzige Redirect-URI `<BASE_URL>/creator/youtube/callback`; einziger Scope `youtube.force-ssl` | nur der inoffizielle Untertitel-Anbieter |
+| `TOKEN_ENCRYPTION_KEYS` | Verschlüsselt die gespeicherten OAuth-Tokens der Creator | selbst erzeugen: `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | pro Umgebung verschieden; zum Wechseln den neuen Schlüssel vorne anfügen | kein Kanal lässt sich verbinden |
+| `TRANSCRIPT_PROXY_*` | Wohnungs-Proxy für den inoffiziellen Untertitel-Abruf; YouTube sperrt Cloud-IPs | webshare.io, Paket „Residential" | eigener Zugang nur für diese App | auf Render meist keine Untertitel; lokal unnötig |
+| `SENTRY_DSN` | Macht aus jedem ERROR eine Benachrichtigung | sentry.io → Projekt → Client Keys (DSN) | ein DSN darf nur Ereignisse senden; persönliche Daten schickt die App ohnehin nicht mit | Fehler stehen nur im Log |
 
 Ohne verifizierte Domain stellt Resend nur an die Adresse des eigenen Kontos
 und an seine Testadressen (`delivered@resend.dev`, `bounced@resend.dev`) zu.
+
+Nach einer Änderung an `ANTHROPIC_API_KEY` den Gateway neu erzeugen:
+`docker compose up -d --force-recreate bifrost`.
 
 Den Webhook erreicht Resend nur über eine öffentliche Adresse. Lokal ginge das
 mit einem Tunnel (`cloudflared tunnel --url http://localhost:8000`) — aber nur
@@ -91,6 +107,24 @@ in einem Netz, in dem Tunnel erlaubt sind, und nie von einem Firmenrechner.
 Die echte Abnahme des Webhooks findet deshalb auf Render statt (Plan §17, M9).
 Ohne Webhook laufen die Tests trotzdem vollständig: Sie signieren ihre
 Ereignisse selbst.
+
+### Modell wechseln
+
+Welche Modelle laufen, steht in `config/settings.toml` unter `[llm]`
+(`model_summary`, `model_sentiment`) und in jeder Worker-Log-Zeile `llm.models`
+beim Start; jeder Aufruf loggt als `llm.call` das Modell, das tatsächlich
+geantwortet hat, mit Token und Kosten. Zum Wechseln drei Stellen, zusammen:
+
+1. `config/settings.toml`: `model_summary`/`model_sentiment` und ein Preis-Eintrag
+   unter `[llm.prices_per_million_tokens]` (ohne ihn startet die App nicht).
+2. `config/bifrost.json`: den Modellnamen beim Key (`models`) und beim Virtual
+   Key (`allowed_models`) — der Gateway lässt nur durch, was dort steht.
+3. `docker compose up -d --force-recreate bifrost`, Worker neu starten.
+
+`uv run pytest` prüft, dass die beiden Dateien zusammenpassen. Ist ein Modell
+beim Anbieter abgeschaltet oder im Gateway nicht freigegeben, schreibt der Worker
+`operator.action_needed` mit Modellname, der Meldung des Anbieters und genau
+diesen Stellen; kein Video geht dabei verloren.
 
 `.env` ist git-ignoriert. Jede Tabelle aus `config/settings.toml` lässt sich per
 Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
@@ -112,13 +146,17 @@ Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
 
 ## Stand
 
-**M0 bis M5** stehen: von „neues Video erkannt" bis „fertige Mail in drei
-Varianten", dazu der Fan-Bereich — Anmeldung mit Double-Opt-in und strenger
-Adressprüfung, Abmeldung, die Sperre nach Bounce oder Beschwerde. M5 ist nach
-einem Code-Review gehärtet (Plan §13). Es fehlen **M6 bis M9**: Zusammenfassungen
-gehen noch an niemanden, nur Bestätigungsmails; der echte Bounce-Webhook wird
-mit dem Deployment abgenommen (M9). `send_batch` wartet auf seinen Aufrufer
-(M6). Fortschritt je Meilenstein in §17 des Plans.
+**M0 bis M6** stehen: von „neues Video erkannt" über den Fan-Bereich
+(Double-Opt-in, strenge Adressprüfung, Abmeldung, Sperre nach Bounce oder
+Beschwerde) bis zum Versand. Zwei Stunden vor dem Sendezeitpunkt holt der Worker
+das Stimmungsbild, eine Stunde vorher bekommt der Creator die Vorschau mit
+„stoppen" und „verschieben", dann geht die Mail genau einmal an alle
+bestätigten Fans. Der Durchlauf ist am 19.09.2026 einmal vollständig gegen die
+echten Dienste gelaufen: YouTube, Transkript, Zusammenfassung, Stimmungsbild,
+Vorschau und Versand an zwei Test-Adressen, genau einmal.
+Es fehlen **M7 bis M9**: Einstellungsseite, Verkaufsseite, Deployment; der echte
+Bounce-Webhook wird mit dem Deployment abgenommen (M9). Fortschritt je
+Meilenstein in §17 des Plans.
 
 Sprache: Code, Kommentare und Logs auf Englisch; diese Datei und alles, was Fans
 und Creator sehen, auf Deutsch.

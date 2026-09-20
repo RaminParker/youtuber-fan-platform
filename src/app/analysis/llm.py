@@ -26,7 +26,7 @@ from app import log
 from app.config import Settings
 from app.db.engine import session_scope
 from app.db.models import LLMCall
-from app.errors import CostCapExceeded, TemporaryError
+from app.errors import CostCapExceeded, NeedsOperator, TemporaryError
 
 COMPLETIONS_PATH = "/v1/chat/completions"
 
@@ -143,7 +143,71 @@ class BifrostGateway:
             return response.json()
         if response.status_code == 429 or response.status_code >= 500:
             raise LLMTemporaryError(f"gateway: HTTP {response.status_code}")
+        _raise_if_operator(response, model)
         raise LLMError(f"gateway: HTTP {response.status_code} {response.text[:200]}")
+
+
+#: What the gateway or the provider says when a key or the account is the
+#: problem — words seen in real answers, lower-cased. A 401/403 always is.
+_ACCOUNT_TROUBLE = ("no keys found", "api key", "api-key", "credit balance", "workspace", "billing")
+
+
+#: Where a model is named. Changing it means these three places, together.
+MODEL_SETTINGS = (
+    "config/settings.toml [llm] model_summary/model_sentiment and its "
+    "[llm.prices_per_million_tokens] entry, plus allowed_models in config/bifrost.json"
+)
+
+
+def _raise_if_operator(response: httpx.Response, model: str) -> None:
+    """Turn a refused key or an empty account into a message that says what to fix.
+
+    Two keys are involved and either can be wrong: ``LLM_GATEWAY_KEY`` between
+    the app and the gateway, ``ANTHROPIC_API_KEY`` between the gateway and the
+    provider. The provider's own words are passed on, because they are usually
+    the fastest way to the cause.
+    """
+    said = _upstream_message(response)
+    if response.status_code == 404 or said.startswith("model:"):
+        raise NeedsOperator(
+            "LLM gateway",
+            f"model {model} is not available at the provider ({said})",
+            f"switch to a model the provider still serves in {MODEL_SETTINGS}",
+        )
+    if "model_blocked" in response.text or "is not allowed for virtual key" in said:
+        raise NeedsOperator(
+            "LLM gateway",
+            f"model {model} is not allowed by the gateway ({said})",
+            f"add it to allowed_models in config/bifrost.json and recreate the gateway; "
+            f"a model is named in {MODEL_SETTINGS}",
+        )
+    if response.status_code in (401, 403):
+        raise NeedsOperator(
+            "LLM gateway",
+            f"key rejected (HTTP {response.status_code}): {said}",
+            "check LLM_GATEWAY_KEY (the same value in app and gateway) and ANTHROPIC_API_KEY "
+            "(the gateway's key for the provider)",
+        )
+    if response.status_code in (400, 402) and any(w in said.lower() for w in _ACCOUNT_TROUBLE):
+        raise NeedsOperator(
+            "LLM gateway",
+            f"the provider account cannot serve the request: {said}",
+            "check ANTHROPIC_API_KEY (valid, scoped to a workspace, allowed for the model) and "
+            "the account's credit; the gateway's start log names the cause (`list-models "
+            "failed`); recreate the gateway after a change",
+        )
+
+
+def _upstream_message(response: httpx.Response) -> str:
+    """Return the error text of a gateway answer, wherever in the body it sits."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:300]
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("error") or error)[:300]
+    return str(error or body)[:300]
 
 
 # --- Ledger and cap ---------------------------------------------------------

@@ -1,6 +1,6 @@
 """Composing the mail a fan receives — and the preview the creator approves."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -193,12 +193,16 @@ class TestThePreview:
             subscription=None,
             stop_token="stop-token",
             send_at=SEND_AT,
+            postpone_until=SEND_AT + timedelta(hours=24),
         )
 
         assert "/m/stop-token/stoppen" in mail.text
         assert "/m/stop-token/verschieben" in mail.text
+        assert "/m/stop-token/verschieben" in mail.html
 
-    def test_it_says_when_the_mail_would_go_out(self, creator, appearance, subscription):
+    def test_past_the_postpone_cap_it_offers_only_stop_and_says_why(
+        self, creator, appearance, subscription
+    ):
         mail = build(
             creator,
             appearance,
@@ -206,9 +210,36 @@ class TestThePreview:
             subscription=None,
             stop_token="stop-token",
             send_at=SEND_AT,
+            postpone_until=None,
         )
 
-        assert "17.09.2026" in mail.text
+        assert "/m/stop-token/stoppen" in mail.html
+        assert "/verschieben" not in mail.html
+        assert "/verschieben" not in mail.text
+        assert "Verschieben geht bei dieser Mail nicht mehr" in mail.text
+
+    def test_its_first_sentence_says_when_and_to_how_many(self, creator, appearance, subscription):
+        mail = build(
+            creator,
+            appearance,
+            subscription,
+            subscription=None,
+            stop_token="stop-token",
+            send_at=datetime(2026, 9, 22, 16, 0, tzinfo=UTC),
+            recipient_count=1234,
+        )
+
+        # 16:00 UTC is 18:00 in Berlin, the product's timezone.
+        sentence = "Diese Mail geht am Dienstag, 22. September, um 18:00 Uhr an 1.234 Abonnenten."
+        assert mail.text.startswith(sentence)
+        assert sentence in mail.html
+
+    def test_one_recipient_is_singular(self, creator, appearance, subscription):
+        mail = build(
+            creator, appearance, subscription, subscription=None, send_at=SEND_AT, recipient_count=1
+        )
+
+        assert "an 1 Abonnent." in mail.text
 
     def test_it_has_no_unsubscribe_headers(self, creator, appearance, subscription):
         # There is nothing for the creator to unsubscribe from.

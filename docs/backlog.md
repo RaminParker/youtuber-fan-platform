@@ -30,6 +30,8 @@ struck from this list. Anyone who defers something — in a plan, a review, or a
 | "Alle abbestellen" across creators | the fan dashboard arrives (Phase 2) | Plan header; unsubscribing is per creator today. |
 | Open and click tracking | the owner decides to measure the manifest §6.3 open-rate criterion in-house | Plan §20 question 4; off by default for privacy and deliverability. |
 | Stripe billing and self-service onboarding | Phase 2 | Manifest §4.4. |
+| **Kostenübersicht pro Creator, für den Betreiber** | before the second paying creator, or before the first price is quoted — whichever comes first | Owner request 2026-09-20: "ich muss abschätzen können, wie teuer jeder Kunde ist, sonst zahle ich drauf." What exists today: `llm_calls` holds every LLM call with tokens and cost per creator and appearance, and `quota.youtube` log lines carry the units per call; nothing sums them up for a human, and mail volume is only in the provider's dashboard. **Smallest useful step:** extend `cli status` (M7) to print, per creator and month, LLM cost from the ledger, mails sent from `deliveries`, and videos processed — that alone answers "what does this customer cost". **Then, if it is worth more:** a page behind the operator login with the same numbers plus deep links to the providers' own dashboards (LLM spend, mail volume, YouTube quota) rather than mirroring their data — links stay correct when a provider changes its billing, a copy does not. Live figures from the providers' billing APIs only where a link is not enough. Not a creator-facing feature: the creator never sees costs. |
+| Stronger credentials than static API keys | before go-live (M9) for the cheap parts; federated, keyless access when a provider offers it for server-to-server calls | Owner question 2026-09-19. Static keys are acceptable for the MVP but must be: one key per environment, restricted (YouTube key to the YouTube Data API v3; Anthropic key scoped to a workspace with a spend limit; Resend key sending-only and domain-bound — plan §17 M9), rotated on a schedule and after any leak. Evaluate short-lived, federated credentials (OIDC / workload identity from the hosting platform) where Google, Anthropic or Resend support them for this use; OAuth already carries the one call that needs the creator's own authority (captions). |
 
 ## Deliberate shortcuts in the code
 
@@ -49,13 +51,14 @@ for its ceiling. Find them all with `grep -rn "ponytail:" src/`.
 | `delivery/email_client.py` (`send_batch`) | one address the provider rejects blocks a whole mailing | it happens once → per-address handling |
 | `web/routes/fan.py` (`/s/`) | no per-state visibility check on summary pages | view tokens leave mails, previews and the confirmation page |
 | `addresses.py` | the local part is lower-cased too | a real provider turns out to be case-sensitive |
-| `subscriptions.py` (`send_confirm_mail`) | "send after the answer, undo on failure" is written twice (confirm mail, magic link) | a third mail needs it (M6 preview, contact form) → one `send_or_undo` helper |
+| `subscriptions.py` (`send_confirm_mail`) | "send after the answer, undo on failure" is written twice (confirm mail, magic link) | a third mail *sent after an HTTP answer* needs it — the contact form (M8) → one `send_or_undo` helper. The M6 preview is not one: it is sent by the worker inside its transaction, and a failure rolls back and retries (checked 2026-09-18). |
 
 ## Known limits, accepted for now
 
 | Limit | Why it is acceptable today | Revisit when … |
 |---|---|---|
-| A fan who unsubscribes while a mailing is sending still gets that one mail | re-filtering each batch would break the payload freeze (plan §8.4) | plan §20 question 9 is answered otherwise |
+| A fan who unsubscribes while a mailing is sending still gets that one mail | re-filtering each batch would break the payload freeze (plan §8.4); **owner decision 2026-09-18** | a complaint from exactly this case |
+| The retry ladder of a send counts every failed attempt, even when batches in between went through | ten failures in about a day mean something is badly wrong; the mailing resumes where it stopped once the operator resets it | long lists meet a flaky provider and `failed` sends show up with most deliveries done |
 | Background mail tasks share the web process's thread pool; a slow provider holds a slot for up to 30 s | one creator, a handful of sign-ups a minute | sign-up volume makes the pool a bottleneck → a small outbox table sent by the worker |
 | A Resend 429 on a confirm mail is not retried; the fan simply submits again | the brake is released on failure, so the retry works | confirm mails start failing in bursts |
 | `--forwarded-allow-ips='*'` makes the per-IP limit forgeable | the per-address brake does not depend on the IP | before go-live: set Render's proxy addresses (notes question 9, M9) |

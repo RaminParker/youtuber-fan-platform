@@ -42,7 +42,7 @@
 
 {% if summary.quote %}
   <blockquote>
-    „{{ summary.quote }}"
+    „{{ summary.quote }}“
     {% if summary.quote_timestamp_seconds is not none %}
       <a href="{{ jump(summary.quote_timestamp_seconds) }}">{{ summary.quote_timestamp_seconds | clock }}</a>
     {% endif %}

@@ -3,12 +3,18 @@
 {% block content %}
   {% if preview %}
     <div class="preview-bar">
-      <strong>Vorschau für {{ creator.name }}</strong> — so sehen deine Abonnenten die Mail.
-      Sie geht um {{ send_at | local_datetime }} raus.
+      <p><strong>{% include "email/preview_when.txt" %}</strong></p>
+      <p>So sehen deine Abonnenten sie. Du musst nichts tun — nur wenn sie nicht oder später
+        rausgehen soll:</p>
       <p>
-        <a href="{{ base_url }}/m/{{ stop_token }}/stoppen">Diese Mail stoppen</a> ·
-        <a href="{{ base_url }}/m/{{ stop_token }}/verschieben">Um {{ postpone_hours }} Stunden verschieben</a>
+        <a class="action" href="{{ base_url }}/m/{{ stop_token }}/stoppen">Mail stoppen</a>
+        {% if postpone_until %}
+          <a class="action secondary" href="{{ base_url }}/m/{{ stop_token }}/verschieben">Verschieben auf {{ postpone_until | long_datetime }}</a>
+        {% endif %}
       </p>
+      {% if not postpone_until %}
+        <p>Verschieben geht bei dieser Mail nicht mehr: Sie käme sonst zu lange nach dem Video.</p>
+      {% endif %}
     </div>
   {% endif %}
 

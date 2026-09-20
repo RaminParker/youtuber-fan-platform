@@ -163,6 +163,8 @@ class NoticeKind(enum.StrEnum):
     TOO_LONG = "too_long"
     OAUTH_RECONSENT = "oauth_reconsent"
     FAILED = "failed"
+    PREVIEW_FAILED = "preview_failed"
+    SEND_FAILED = "send_failed"
 
 
 # --- Tables -----------------------------------------------------------------
@@ -406,7 +408,9 @@ class Mailing(Base):
     # The creator's rendering-relevant fields, frozen when the preview goes out:
     # the fans get exactly the mail he saw and did not stop, and a retried batch
     # carries a byte-identical payload under its stable idempotency key.
-    render_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # `none_as_null`: clearing it must write SQL NULL, not a stored JSON "null",
+    # or every `IS NULL` query quietly misses the rows that were cleared.
+    render_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
 
     stopped_at: Mapped[datetime | None] = timestamp()
     sent_at: Mapped[datetime | None] = timestamp()

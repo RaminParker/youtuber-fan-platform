@@ -1,8 +1,11 @@
-{% if preview %}VORSCHAU FÜR {{ creator.name | upper }} — so sehen deine Abonnenten die Mail.
-Sie geht um {{ send_at | local_datetime }} raus.
+{% if preview %}{% include "email/preview_when.txt" %}
+So sehen deine Abonnenten sie. Du musst nichts tun — nur wenn sie nicht oder später rausgehen soll:
 
-Stoppen:     {{ base_url }}/m/{{ stop_token }}/stoppen
-Verschieben: {{ base_url }}/m/{{ stop_token }}/verschieben
+Mail stoppen: {{ base_url }}/m/{{ stop_token }}/stoppen
+{% if postpone_until %}Verschieben auf {{ postpone_until | long_datetime }}: {{ base_url }}/m/{{ stop_token }}/verschieben
+{% else %}Verschieben geht bei dieser Mail nicht mehr: Sie käme sonst zu lange nach dem Video.
+{% endif %}
+--
 
 {% endif %}{% if creator.greeting_text %}{{ creator.greeting_text }}
 
@@ -13,7 +16,7 @@ Verschieben: {{ base_url }}/m/{{ stop_token }}/verschieben
 {% for point in summary.key_points -%}
 * {{ point.text }}{% if point.timestamp_seconds is not none %} — {{ jump(point.timestamp_seconds) }}{% endif %}
 {% endfor %}
-{% if summary.quote %}„{{ summary.quote }}"{% if summary.quote_timestamp_seconds is not none %}
+{% if summary.quote %}„{{ summary.quote }}“{% if summary.quote_timestamp_seconds is not none %}
 {{ jump(summary.quote_timestamp_seconds) }}{% endif %}
 
 {% endif %}{% if sentiment %}WIE DIE COMMUNITY REAGIERT HAT

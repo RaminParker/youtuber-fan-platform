@@ -149,7 +149,8 @@ class TestErrors:
 
     def test_temporary_means_what_the_worker_catches(self):
         assert issubclass(EmailTemporaryError, TemporaryError)
-        assert issubclass(QuotaExhausted, TemporaryError)
+        # An exhausted plan is the operator's, not the retry ladder's.
+        assert not issubclass(QuotaExhausted, TemporaryError)
 
 
 class TestWebhookSignature:

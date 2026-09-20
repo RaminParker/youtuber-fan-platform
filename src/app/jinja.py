@@ -14,12 +14,21 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
+from app.branding import PAGE_DARK, PAGE_LIGHT, ink_on, readable_on
 from app.config import Settings, get_settings
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 DATETIME_FORMAT = "%d.%m.%Y um %H:%M Uhr"
 DATE_FORMAT = "%d.%m.%Y"
+
+# Spelled out rather than taken from the locale: a container's locale is
+# whatever the base image ships, and a preview must never say "Tuesday".
+WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+MONTHS = (
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)  # fmt: skip
 
 
 def as_clock(seconds: int) -> str:
@@ -32,6 +41,18 @@ def as_clock(seconds: int) -> str:
 def _localise(value: datetime, timezone: str, fmt: str) -> str:
     """Render a UTC timestamp in the product's timezone."""
     return value.astimezone(ZoneInfo(timezone)).strftime(fmt)
+
+
+def long_datetime(value: datetime, timezone: str) -> str:
+    """Render a moment the way a person says it: "Dienstag, 23. September, um 18:00 Uhr"."""
+    local = value.astimezone(ZoneInfo(timezone))
+    weekday, month = WEEKDAYS[local.weekday()], MONTHS[local.month - 1]
+    return f"{weekday}, {local.day}. {month}, um {local:%H:%M} Uhr"
+
+
+def thousands(number: int) -> str:
+    """Group digits the German way: 1.234."""
+    return f"{number:,}".replace(",", ".")
 
 
 def build_environment(settings: Settings) -> Environment:
@@ -54,7 +75,13 @@ def build_environment(settings: Settings) -> Environment:
     timezone = settings.product.timezone
     environment.filters["local_datetime"] = lambda v: _localise(v, timezone, DATETIME_FORMAT)
     environment.filters["clock"] = as_clock
+    environment.filters["long_datetime"] = lambda v: long_datetime(v, timezone)
+    environment.filters["thousands"] = thousands
     environment.filters["local_date"] = lambda v: _localise(v, timezone, DATE_FORMAT)
+    # Brand colours are the creator's; what has to be read is derived from them.
+    environment.globals["ink_on"] = ink_on
+    environment.globals["link_on_light"] = lambda accent: readable_on(accent, PAGE_LIGHT)
+    environment.globals["link_on_dark"] = lambda accent: readable_on(accent, PAGE_DARK)
     environment.globals["product"] = settings.product
     environment.globals["base_url"] = settings.base_url
     return environment

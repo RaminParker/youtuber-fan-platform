@@ -17,6 +17,7 @@ the code that exists is cut, and records the decisions behind it.
 | what a page or a mail looks like | `src/app/templates/` |
 | the sign-up, confirm and unsubscribe rules | `src/app/subscriptions.py` |
 | what counts as a valid address | `src/app/addresses.py` |
+| when a mail goes out, and how it goes out exactly once | `src/app/delivery/mailing.py`, `src/app/jobs/schedule.py` (see "Mailings" below) |
 | what was deferred, and when to build it | `docs/backlog.md` |
 
 ## The cut
@@ -100,6 +101,16 @@ payload under a stable idempotency key. The alternative — hashing the body int
 the key — was rejected because it turns a changed body into a second mail for
 recipients who had already received the first.
 
+### The brand colour stays; what must be read is derived from it
+A creator picks one colour, and it then has to work on a white mail, a light
+page and a dark one. Left alone it fails at least one of those — near-black
+vanishes in dark mode, pale yellow on white, and white button text on a pale
+button. `app/branding.py` keeps the colour for surfaces (buttons, rules) and
+derives what carries text: the link colour is moved along its own hue until it
+clears WCAG AA against the page, and a button's label is black or white,
+whichever reads. The creator never sees the failure mode on their own machine,
+which sits in one mode — so it cannot be left to their judgement.
+
 ### The online page always shows the full text
 The mail variant governs the mail only. If the page mirrored the variant, a
 teaser mail's "weiterlesen" link would arrive at the same teaser, and the full
@@ -126,6 +137,12 @@ and one failure state. Two rules are worth knowing before reading `jobs/steps.py
   LLM budget is spent — all of these park the row for six hours *without*
   counting an attempt. Only genuine errors count, and only they can exhaust the
   ladder and reach `failed`.
+- **A key or a plan is the operator's, not the video's.** A rejected API key
+  or an exhausted quota raises `NeedsOperator`: the row waits an hour without
+  counting an attempt, nobody but the operator hears of it, and every attempt
+  logs `operator.action_needed` at ERROR — service, the provider's own words,
+  and which setting to check. Missing secrets are logged at start
+  (`config.secret_missing`).
 - **`now` is always a parameter.** No step reads the clock. That is what lets
   the tests drive a seven-day schedule in milliseconds.
 
@@ -203,7 +220,67 @@ Rules every route inherits, so no route can forget them (`web/server.py`,
 - **Nothing personal leaves in an error report.** Sentry gets no frame locals,
   no request bodies, no PII.
 
-## Still to be written
+## Mailings: from schedule to inbox
 
-The mailing transition table and the exactly-once mechanics belong here once M6
-lands. Until then the plan is the authority for them.
+One mailing per video. Its status is written in `delivery/mailing.py` and
+nowhere else; the steps in `jobs/steps.py` and the stop/postpone routes in
+`web/routes/mailings.py` only call it. When a step is due is one pure function,
+`jobs/schedule.py:next_mailing_step`.
+
+| From | To | Trigger |
+|---|---|---|
+| — | `scheduled` | `summarize`: send time = publication + delay, never earlier than now + minimum |
+| `scheduled` | `sentiment_ready` | `prepare_sentiment` at T−2h; without a sentiment if none can be had before the preview is due |
+| `scheduled` | `cancelled` | `prepare_sentiment` or the daily `cleanup`: the video is gone or private |
+| `sentiment_ready` | `preview_sent` | `send_preview` at T−1h; pushes T to at least one stop window from now, freezes the payload |
+| `preview_sent` | `sending` | `send` at T, once the preview has been out a full stop window; takes the recipient snapshot |
+| `preview_sent` | `cancelled` | `send`'s re-check: the video is gone or private |
+| `sending` | `sent` | `send`, when no delivery is pending |
+| `scheduled`/`sentiment_ready`/`preview_sent` | `stopped` | the creator's stop link |
+| `scheduled`/`sentiment_ready`/`preview_sent` | `scheduled` | the postpone link: later send time, new token, new sentiment, new preview |
+| `sentiment_ready`/`preview_sent`/`sending` | `failed` | the retry ladder is exhausted, or an error no retry fixes; the creator is told after the commit |
+
+Two rules make the table safe with two writers (worker and web process) and no
+lock between them:
+
+- **Every transition is one conditional statement**, `UPDATE … WHERE id = :id
+  AND status = :expected`. Zero rows means someone else won; the loser logs
+  `mailing.transition_lost` and does nothing else. The routes use the same
+  shape keyed on the stop token.
+- **A new schedule is a new token.** Postponing rotates `stop_token`, so every
+  link of the old preview is dead, and the next preview is a new mail with a new
+  idempotency key.
+
+### Exactly once
+
+Four mechanisms, each necessary:
+
+1. **Snapshot.** In the transaction that moves `preview_sent → sending`, one
+   `INSERT … SELECT` writes a `deliveries` row for every confirmed, unblocked
+   subscription of the creator. Unique `(mailing_id, subscription_id)`. Whoever
+   confirms later waits for the next mailing; whoever leaves during the send
+   still gets this one (owner decision, 2026-09-18).
+2. **Stable batches.** A batch is the next 100 pending deliveries `ORDER BY id`,
+   sent with the idempotency key `mailing/{id}/{first_delivery_id}`. Its rows are
+   marked sent in the commit after the provider accepted it. A crash between the
+   call and the commit rebuilds the same batch under the same key, and the
+   provider recognises the repeat.
+3. **Frozen payload.** Every mail of a mailing renders from `render_snapshot`,
+   written with `preview_sent`. The repeat in (2) is therefore byte-identical —
+   what the provider does with a known key and a changed body is undocumented,
+   and this design never asks.
+4. **Advisory lock.** `send` holds `pg_try_advisory_lock(mailing_id)` on a
+   connection of its own for the whole run — a *session* lock, because a
+   transaction lock would end with the first batch's commit. A second worker
+   (a deploy overlap) finds it taken and returns. A failed unlock throws the
+   connection away instead of returning it to the pool still locked.
+
+### The creator's brakes
+
+The preview is the fan mail itself, with a bar on top: when it goes out, to how
+many, and two links. They lead to a page with one button (link scanners follow
+links); the POST acts. The answer is always true: "Gestoppt" only when this
+request stopped the mail, otherwise what actually happened — on its way,
+already stopped, cancelled, or a link replaced by a newer preview (410).
+Postponing adds `schedule.postpone_hours`, up to publication plus
+`max_delay_hours`; past that cap only stopping is offered, with the reason.

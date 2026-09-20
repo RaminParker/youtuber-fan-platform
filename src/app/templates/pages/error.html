@@ -1,6 +1,9 @@
 {% extends "pages/base.html" %}
 {% block title %}{{ heading }} — {{ product.name }}{% endblock %}
 {% block content %}
-  <h1>{{ heading }}</h1>
-  <p>{{ message }}</p>
+  {# An outcome page announces itself: role="status" for a result, "alert" for a refusal. #}
+  <div{% if role is defined %} role="{{ role }}"{% endif %}>
+    <h1>{{ heading }}</h1>
+    <p>{{ message }}</p>
+  </div>
 {% endblock %}

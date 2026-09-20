@@ -17,7 +17,7 @@ from typing import Any, NoReturn
 import httpx
 
 from app import log
-from app.errors import TemporaryError
+from app.errors import NeedsOperator, TemporaryError
 
 API_BASE = "https://www.googleapis.com/youtube/v3"
 WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
@@ -40,8 +40,10 @@ QUOTA_UNITS = {
 
 #: Error reasons that a later attempt could survive.
 _TEMPORARY_REASONS = frozenset(
-    {"quotaExceeded", "rateLimitExceeded", "processingFailure", "backendError", "internalError"}
+    {"rateLimitExceeded", "processingFailure", "backendError", "internalError"}
 )
+_QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded"})
+SERVICE = "YouTube Data API"
 
 _DURATION = re.compile(
     r"^P(?:(?P<days>\d+)D)?"
@@ -125,6 +127,20 @@ def _reason(payload: dict[str, Any]) -> str:
     return errors[0].get("reason", "")
 
 
+def _key_problem(payload: dict[str, Any]) -> str:
+    """Return Google's words when the API key itself was refused, else ``""``.
+
+    Google reports a bad key as a generic ``badRequest`` and puts the real
+    reason (``API_KEY_INVALID``, ``API_KEY_EXPIRED`` …) in ``details``.
+    """
+    error = payload.get("error", {})
+    for detail in error.get("details") or []:
+        if str(detail.get("reason", "")).startswith("API_KEY"):
+            return f"{detail['reason']} ({error.get('message', '')})"
+    message = str(error.get("message", ""))
+    return message if "API key" in message else ""
+
+
 class YouTubeDataApi:
     """One method per endpoint, one place where errors become our error types."""
 
@@ -180,6 +196,19 @@ class YouTubeDataApi:
         reason = _reason(payload)
         if response.status_code >= 500 or response.status_code == 429:
             raise YouTubeTemporaryError(f"{endpoint}: HTTP {response.status_code}")
+        if reason in _QUOTA_REASONS:
+            raise NeedsOperator(
+                SERVICE,
+                f"daily quota exhausted ({endpoint})",
+                "it resets at midnight Pacific (09:00 Berlin); if this repeats, request more "
+                "quota in the Google Cloud console",
+            )
+        if key_problem := _key_problem(payload):
+            raise NeedsOperator(
+                SERVICE,
+                f"API key rejected: {key_problem}",
+                "check YOUTUBE_API_KEY and the key's API restrictions in the Google Cloud console",
+            )
         if reason in _TEMPORARY_REASONS:
             raise YouTubeTemporaryError(f"{endpoint}: {reason}")
         if reason in {"commentsDisabled", "videoCommentsDisabled"}:

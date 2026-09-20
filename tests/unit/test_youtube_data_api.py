@@ -81,9 +81,7 @@ class TestUploadsPlaylist:
 
 
 class TestErrorMapping:
-    @pytest.mark.parametrize(
-        "reason", ["quotaExceeded", "rateLimitExceeded", "processingFailure", "backendError"]
-    )
+    @pytest.mark.parametrize("reason", ["rateLimitExceeded", "processingFailure", "backendError"])
     def test_these_reasons_are_worth_retrying(self, reason):
         api = api_with(responder(403, google_error(reason)))
 

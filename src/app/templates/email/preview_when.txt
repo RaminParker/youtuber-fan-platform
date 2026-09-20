@@ -1,0 +1,6 @@
+{#- The first sentence of every preview: what happens, when, to how many. -#}
+{%- if recipient_count -%}
+Diese Mail geht am {{ send_at | long_datetime }} an {{ recipient_count | thousands }} {{ "Abonnent" if recipient_count == 1 else "Abonnenten" }}.
+{%- else -%}
+Diese Mail geht am {{ send_at | long_datetime }} raus — im Moment hast du aber noch keine bestätigten Abonnenten.
+{%- endif -%}

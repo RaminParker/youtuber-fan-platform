@@ -28,6 +28,7 @@ from app.config import Settings, get_settings
 from app.creator_settings import effective_settings
 from app.db.engine import session_scope
 from app.db.models import (
+    MAILING_STOPPABLE,
     Analysis,
     AnalysisKind,
     Appearance,
@@ -35,6 +36,8 @@ from app.db.models import (
     BlockedReason,
     Creator,
     JobRun,
+    Mailing,
+    MailingStatus,
     NoticeKind,
     SkipReason,
     Source,
@@ -44,10 +47,11 @@ from app.db.models import (
     Transcript,
     TranscriptOrigin,
 )
+from app.delivery import mailing as mailings
 from app.delivery.mailing import schedule_mailing
 from app.delivery.render import render_notice_mail
-from app.errors import TemporaryError
-from app.jobs.schedule import WAIT_FOR_THE_WORLD
+from app.errors import CostCapExceeded, NeedsOperator, TemporaryError
+from app.jobs.schedule import WAIT_FOR_THE_WORLD, preview_deadline, retry_at
 from app.services import get_services
 from app.sources.base import ContentItem
 from app.sources.youtube import feed as youtube_feed
@@ -278,7 +282,8 @@ def cleanup(session: Session, now: datetime, settings: Settings) -> None:
     deleting it would cascade into the subscription being added. Tomorrow's
     run gets it, if it is still an orphan then.
 
-    The re-check of deleted videos joins this job with the send path (M6).
+    Finally every analysed video is asked again whether it is still public
+    (``_recheck_videos``).
     """
     retention = timedelta(days=settings.email.unsubscribed_retention_days)
     expired = session.execute(
@@ -302,7 +307,40 @@ def cleanup(session: Session, now: datetime, settings: Settings) -> None:
         .with_for_update(skip_locked=True)
     )
     deleted = session.execute(delete(Subscriber).where(Subscriber.id.in_(orphans))).rowcount
-    logger.info(log.CLEANUP_DONE, subscriptions=expired, subscribers=deleted)
+    gone = _recheck_videos(session)
+    logger.info(log.CLEANUP_DONE, subscriptions=expired, subscribers=deleted, videos_gone=gone)
+
+
+def _recheck_videos(session: Session) -> int:
+    """Mark every analysed video that is deleted or private ``unavailable``.
+
+    Every one, not only those with a mailing: a back catalogue video has none,
+    and its summary page is exactly what the confirmation page hands new fans
+    (manifest §7.9). An open mailing of such a video is cancelled. A failing
+    YouTube call costs this part its run, never the deletions above — those
+    protect privacy and must not wait for a video platform.
+
+    Returns
+    -------
+    int
+        How many videos turned out to be gone.
+    """
+    analysed = session.scalars(
+        select(Appearance).where(Appearance.status == AppearanceStatus.ANALYZED)
+    ).all()
+    if not analysed:
+        return 0
+    try:
+        items = get_services().youtube.item_details([a.external_id for a in analysed])
+    except Exception:
+        logger.exception(log.CLEANUP_RECHECK_FAILED, videos=len(analysed))
+        return 0
+
+    public = {item.external_id for item in items if item.is_public}
+    gone = [appearance for appearance in analysed if appearance.external_id not in public]
+    for appearance in gone:
+        _video_gone(session, appearance)
+    return len(gone)
 
 
 def job_is_due(session: Session, name: str, now: datetime, every: timedelta) -> bool:
@@ -532,7 +570,7 @@ def summarize(session: Session, appearance_id: int, now: datetime) -> None:
     appearance.last_error = None
 
     if appearance.is_backfill:
-        _sentiment_now(session, appearance, source, creator, settings)
+        _sentiment_now(session, appearance, source, creator, now, settings)
         return
 
     effective = effective_settings(creator, settings)
@@ -550,6 +588,7 @@ def _sentiment_now(
     appearance: Appearance,
     source: Source,
     creator: Creator,
+    now: datetime,
     settings: Settings,
 ) -> None:
     """Add the comment picture to a back catalogue item, right away.
@@ -558,28 +597,48 @@ def _sentiment_now(
     sentiment box is a bonus, and an old video is not worth a retry ladder.
     """
     try:
-        raw = get_services().youtube.comments(appearance.external_id, settings.comments.max_count)
-        kept = filter_comments(raw, settings.comments, channel_id=source.external_id)
-        if not kept:
-            return
-        completion = analyse_sentiment(
-            get_services().llm, kept, title=appearance.title, settings=settings
-        )
+        _fetch_sentiment(session, appearance, source, creator, now, settings)
     except Exception as error:
         logger.warning(
             log.MAILING_SENTIMENT_SKIPPED, appearance_id=appearance.id, reason=str(error)
         )
-        return
 
-    record_call(
+
+def _fetch_sentiment(
+    session: Session,
+    appearance: Appearance,
+    source: Source,
+    creator: Creator,
+    now: datetime,
+    settings: Settings,
+) -> int:
+    """Fetch, filter and summarise the comments; return how many were used.
+
+    Zero means no sentiment row: comments switched off, or nothing survived the
+    filter. The templates render the box only when there is one.
+    """
+    raw = get_services().youtube.comments(appearance.external_id, settings.comments.max_count)
+    kept = filter_comments(raw, settings.comments, channel_id=source.external_id)
+    if not kept:
+        return 0
+
+    assert_under_cap(session, creator.id, now, settings)
+    booking = dict(
         purpose=SENTIMENT_PURPOSE,
         model=settings.llm.model_sentiment,
         prompt_version=settings.llm.sentiment_prompt_version,
         creator_id=creator.id,
         appearance_id=appearance.id,
         settings=settings,
-        completion=completion,
     )
+    try:
+        completion = analyse_sentiment(
+            get_services().llm, kept, title=appearance.title, settings=settings
+        )
+    except Exception as error:
+        record_call(**booking, error=error)
+        raise
+    record_call(**booking, completion=completion)
     _upsert_analysis(
         session,
         appearance.id,
@@ -587,6 +646,7 @@ def _sentiment_now(
         completion,
         settings.llm.sentiment_prompt_version,
     )
+    return len(kept)
 
 
 def _upsert_analysis(
@@ -613,3 +673,124 @@ def _upsert_analysis(
             set_={"prompt_version": prompt_version, "model": completion.model, "content": content},
         )
     )
+
+
+def _video_gone(session: Session, appearance: Appearance) -> None:
+    """Retire a deleted or private video: its page goes, its open mailing too.
+
+    Mails already sent cannot be recalled; that is in the partner contract,
+    not in the code (manifest §7.9).
+    """
+    _terminate(appearance, AppearanceStatus.UNAVAILABLE, reason="no_longer_public")
+    mailing = session.scalar(select(Mailing).where(Mailing.appearance_id == appearance.id))
+    # A send that has started finishes: half a list is the worst of both outcomes.
+    if mailing is not None and mailing.status in MAILING_STOPPABLE:
+        mailings.cancel(session, mailing.id, {mailing.status}, reason="video_unavailable")
+
+
+def _still_public(appearance: Appearance) -> bool:
+    """Ask YouTube (one quota unit) whether the video is still there for everybody."""
+    items = get_services().youtube.item_details([appearance.external_id])
+    return bool(items) and items[0].is_public
+
+
+def _load_mailing(
+    session: Session, mailing_id: int, status: MailingStatus
+) -> tuple[Mailing, Appearance, Source, Creator] | None:
+    """Load the mailing and what hangs off it — or ``None`` if it has moved on."""
+    mailing = session.get(Mailing, mailing_id)
+    if mailing is None or mailing.status != status:
+        return None
+    appearance = session.get(Appearance, mailing.appearance_id)
+    source = session.get(Source, appearance.source_id)
+    return mailing, appearance, source, session.get(Creator, source.creator_id)
+
+
+def prepare_sentiment(session: Session, mailing_id: int, now: datetime) -> None:
+    """Check the video and read the comments, two hours before the send.
+
+    This step never fails a mailing. The comment box is a bonus; when it cannot
+    be had before the preview is due — a spent budget, a provider that keeps
+    failing, anything no retry would fix — the mail goes on without it.
+    """
+    settings = get_settings()
+    found = _load_mailing(session, mailing_id, MailingStatus.SCHEDULED)
+    if found is None:
+        return
+    mailing, appearance, source, creator = found
+
+    try:
+        if not _still_public(appearance):
+            _video_gone(session, appearance)
+            return
+        used = _fetch_sentiment(session, appearance, source, creator, now, settings)
+    except TemporaryError as error:
+        deadline = preview_deadline(mailing.send_at, settings.schedule)
+        if retry_at(mailing.attempts + 1, now) < deadline:
+            raise
+        reason = f"gave up before the preview: {error}"
+    except CostCapExceeded:
+        reason = "cost_cap"
+    except NeedsOperator as error:
+        # The mail goes on without the box; the operator is told, loudly.
+        logger.error(
+            log.OPERATOR_ACTION_NEEDED,
+            mailing_id=mailing.id,
+            service=error.service,
+            problem=error.problem,
+            fix=error.fix,
+        )
+        reason = str(error)
+    except Exception as error:
+        reason = f"{type(error).__name__}: {error}"
+    else:
+        mailings.mark_sentiment_ready(session, mailing.id, comments_used=used)
+        return
+
+    logger.warning(log.MAILING_SENTIMENT_SKIPPED, mailing_id=mailing.id, reason=reason)
+    mailings.mark_sentiment_ready(session, mailing.id, comments_used=0)
+
+
+def send_preview(session: Session, mailing_id: int, now: datetime) -> None:
+    """One stop window before the send: the creator gets the exact mail, with the brakes."""
+    found = _load_mailing(session, mailing_id, MailingStatus.SENTIMENT_READY)
+    if found is None:
+        return
+    mailing, appearance, _, creator = found
+    mailings.send_preview(session, mailing, appearance, creator, now, get_settings())
+
+
+def send(session: Session, mailing_id: int, now: datetime) -> None:
+    """Send to every confirmed fan, exactly once — or resume a send that was interrupted."""
+    with mailings.exclusive(mailing_id) as held:
+        if not held:
+            logger.info(log.MAILING_SEND_LOCKED, mailing_id=mailing_id)
+            return
+        mailing = session.get(Mailing, mailing_id)
+        if mailing is None:
+            return
+        if mailing.status == MailingStatus.PREVIEW_SENT and not _begin(session, mailing):
+            return
+        found = _load_mailing(session, mailing_id, MailingStatus.SENDING)
+        if found is None:
+            return
+        mailing, appearance, _, creator = found
+        mailings.send_batches(session, mailing, appearance, creator, now, get_settings())
+
+
+def _begin(session: Session, mailing: Mailing) -> bool:
+    """Re-check the video, then ``preview_sent → sending`` with the recipient snapshot.
+
+    Committed at once: the batches that follow must see the snapshot, and a
+    crash after this point resumes from ``sending``.
+    """
+    appearance = session.get(Appearance, mailing.appearance_id)
+    if not _still_public(appearance):
+        _video_gone(session, appearance)
+        return False
+    creator_id = session.scalar(select(Source.creator_id).where(Source.id == appearance.source_id))
+    if not mailings.start_sending(session, mailing.id, creator_id):
+        return False
+    session.commit()
+    session.expire_all()
+    return True

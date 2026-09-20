@@ -124,13 +124,45 @@ class FakeYouTubeConnection:
 
 
 class FakeEmailClient:
-    """Collects what would have been sent, so a test can read it back."""
+    """Collects what would have been sent, so a test can read it back.
 
-    def __init__(self, fail_with: Exception | None = None) -> None:
+    ``batch_fails_with`` makes batch calls fail from the ``batches_before_failure``-th
+    on; ``lose_response`` records a batch and *then* raises, like a provider that
+    delivered but whose answer never arrived. ``on_send`` runs before each
+    single send — a hook for committing a competing write mid-step.
+    """
+
+    def __init__(
+        self,
+        fail_with: Exception | None = None,
+        batch_fails_with: Exception | None = None,
+        batches_before_failure: int = 0,
+        lose_response: bool = False,
+        on_send=None,
+    ) -> None:
         self.sent: list[OutgoingEmail] = []
         self.fail_with = fail_with
+        self.batch_fails_with = batch_fails_with
+        self.batches_before_failure = batches_before_failure
+        self.lose_response = lose_response
+        self.on_send = on_send
+        self.batches: list[list[OutgoingEmail]] = []
+
+    def send_batch(self, mails: list[OutgoingEmail]) -> list[str]:
+        failing = (
+            self.batch_fails_with is not None and len(self.batches) >= self.batches_before_failure
+        )
+        if failing and not self.lose_response:
+            raise self.batch_fails_with
+        self.batches.append(list(mails))
+        self.sent.extend(mails)
+        if failing:
+            raise self.batch_fails_with
+        return [f"fake-batch-{len(self.sent)}-{i}" for i in range(len(mails))]
 
     def send(self, mail: OutgoingEmail) -> str:
+        if self.on_send is not None:
+            self.on_send(mail)
         if self.fail_with is not None:
             raise self.fail_with
         self.sent.append(mail)

@@ -21,3 +21,22 @@ class CostCapExceeded(Exception):
     would be given up on for having been *cheap*. The worker parks it until the
     cap resets instead.
     """
+
+
+class NeedsOperator(Exception):
+    """A rejected credential or an exhausted plan: only a person can fix it.
+
+    Not a :class:`TemporaryError`: retrying would burn the ladder and, after
+    ten attempts, give a video up for *our* misconfiguration — and tell its
+    creator so. The worker parks the row without counting an attempt and logs
+    ``operator.action_needed`` at ERROR, with this message, every time.
+
+    The message names the service, what went wrong (with the provider's own
+    words) and what to check, so the log line alone is enough to fix it.
+    """
+
+    def __init__(self, service: str, problem: str, fix: str) -> None:
+        super().__init__(f"{service}: {problem} — {fix}")
+        self.service = service
+        self.problem = problem
+        self.fix = fix

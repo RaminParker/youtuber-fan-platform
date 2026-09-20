@@ -289,3 +289,18 @@ def get_settings() -> Settings:
     Tests call ``get_settings.cache_clear()`` after changing the environment.
     """
     return Settings()  # type: ignore[call-arg]
+
+
+def missing_secrets(settings: Settings, needed: dict[str, str]) -> dict[str, str]:
+    """Return the needed environment variables that are empty, with what breaks.
+
+    Parameters
+    ----------
+    needed
+        Variable name (as in ``.env``) → what fails without it.
+    """
+    return {
+        name: consequence
+        for name, consequence in needed.items()
+        if not getattr(settings.secrets, name.lower())
+    }

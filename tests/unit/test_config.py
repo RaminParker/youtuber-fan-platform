@@ -141,3 +141,15 @@ class TestStartUpValidation:
                 session_hours=24,
                 max_custom_text_chars=300,
             )
+
+
+class TestMissingSecrets:
+    def test_only_empty_ones_are_reported_with_what_breaks(self, monkeypatch):
+        from app.config import get_settings, missing_secrets
+
+        monkeypatch.setenv("RESEND_API_KEY", "re_set")
+        monkeypatch.setenv("YOUTUBE_API_KEY", "")
+        get_settings.cache_clear()
+        needed = {"RESEND_API_KEY": "no mail", "YOUTUBE_API_KEY": "no videos"}
+
+        assert missing_secrets(get_settings(), needed) == {"YOUTUBE_API_KEY": "no videos"}

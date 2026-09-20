@@ -60,7 +60,7 @@
 <p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
 <p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
 <code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
-Stand: 18.09.2026 — M5 (Fan-Bereich) umgesetzt, per Code-Review geprüft und gehärtet: 482 Tests grün, Lint sauber. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
+Stand: 18.09.2026 — M6 (Zeitplan, Vorschau, Versand) umgesetzt: 536 Tests grün, Lint sauber, Live-Abnahme offen. Davor am selben Tag M5 (Fan-Bereich), per Code-Review geprüft und gehärtet. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
 
 <div class="toc">
   <strong>Inhalt</strong>
@@ -749,6 +749,136 @@ gescheitert. Die geänderten Planstellen tragen den Marker „<em>Changed 2026-0
   </ul>
 </div>
 
+<h3>Beim Bauen von M6 (18.09.2026)</h3>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §9.2</span></div>
+  <h4>Eine Fehler-Mitteilung an den Creator sagt, was für die Fans gilt</h4>
+  <p>Die vorhandene Mitteilung „fehlgeschlagen" sagt „Zu diesem Video geht keine Mail an deine Abonnenten".
+  Für einen Versand, der nach dem ersten Batch hängen bleibt, ist das falsch — ein Teil hat die Mail schon.</p>
+  <span class="label">Entscheidung</span>
+  <p>Zwei neue Arten: <code>preview_failed</code> (nichts ging raus) und <code>send_failed</code> („ein Teil hat
+  sie womöglich schon, doppelt bekommt sie niemand"). Die Mitteilung geht erst nach dem Commit von
+  <code>failed</code> raus und nur, wenn genau dieser Aufruf den Übergang gewonnen hat. Kein neues
+  Datenbank-Constraint, keine Migration.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §10</span></div>
+  <h4>Die Stopp-Seite sagt immer die Wahrheit — auch nach einem verlorenen Rennen</h4>
+  <p>Die POST-Aktion ist eine bedingte Anweisung. Scheitert sie, liest die Seite den Stand neu und nennt ihn:
+  unterwegs, verschickt, bereits gestoppt, abgesagt (Video weg) oder „Link veraltet, es gibt eine neuere Vorschau"
+  (410). Neu gelesen wird mit <code>populate_existing</code>: Die Session hatte die Zeile schon geladen, und ohne
+  frische Werte hätte die Seite den alten Stand gemeldet.</p>
+  <span class="label">Verworfen</span>
+  <p>Eine Seite „Das hat nicht geklappt" für alle Fälle — ehrlich, aber nutzlos für jemanden, der wissen will,
+  ob seine Fans die Mail bekommen.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Plan §8.4</span></div>
+  <h4>Verschieben ist optimistisch gesperrt, Vorschau braucht keinen Token-Vergleich</h4>
+  <p>Die neue Sendezeit wird aus der alten berechnet (reine Funktion <code>postponed_send_at</code>). Damit
+  die Vorschau-Aufgabe sie nicht zwischen Lesen und Schreiben verschiebt, prüft die Anweisung zusätzlich
+  <code>send_at = :gelesen</code>. Umgekehrt braucht <code>send_preview</code> keinen Token-Vergleich: Ein
+  Verschieben setzt den Status auf <code>scheduled</code>, und das fängt die Statusbedingung schon ab.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Tests</span></div>
+  <h4>Mutationsproben: neun getötet, ein gleichwertiger Überlebender</h4>
+  <p>Advisory-Lock, bedingte Übergänge, jede Snapshot-Bedingung, Payload-Freeze, Token-Rotation, „nie
+  gestoppt sagen", das Schieben der Sendezeit, das Stopp-Fenster und „keine Fehlermeldung für ein gestopptes
+  Mailing" — jede Mutation ließ den dafür gedachten Test scheitern, jede Wiederherstellung wurde per Dateivergleich
+  geprüft. <code>ORDER BY id DESC</code> überlebt zu Recht: Es kommt auf eine <em>stabile</em> Reihenfolge an,
+  nicht auf die Richtung.</p>
+</div>
+
+<h3>Klare Fehler bei Keys und Quoten (19.09.2026)</h3>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Plan §9.4</span></div>
+  <h4>Ein abgelaufener Key machte aus jedem Video in Arbeit ein <code>failed</code></h4>
+  <p>Ein abgelehnter YouTube-, Gateway-, Anthropic- oder Resend-Key galt als dauerhafter Fehler: Das Video landete
+  sofort in <code>failed</code>, der Creator bekam „Ein Video konnte nicht verarbeitet werden", und im Log stand
+  nur <code>HTTP 400 keyInvalid</code> — kein Wort davon, welche Variable zu prüfen ist. Eine leere Quota zählte
+  als gewöhnlicher Wiederholungsversuch und erschien nur als WARNING.</p>
+  <span class="label">Behoben, test-first</span>
+  <p>Neuer Fehlertyp <code>NeedsOperator</code>. Die Zeile wartet eine Stunde, <em>ohne</em> einen Versuch zu zählen,
+  erreicht nie <code>failed</code>, niemand außer dem Betreiber erfährt davon, und jeder Versuch schreibt
+  <code>operator.action_needed</code> auf ERROR: Dienst, die Worte des Anbieters, die zu prüfende Einstellung.
+  Die Zuordnung beruht auf echten Antworten, am 19.09. live abgefragt. Beim Start melden Worker und Web-Prozess
+  jede leere, benötigte Variable (<code>config.secret_missing</code>). Vier Mutationsproben, alle getötet.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Gateway</span></div>
+  <h4>„no keys found" heißt beim Gateway nicht „kein Key", sondern „Key unbrauchbar"</h4>
+  <p>Bifrost fragt beim Start die Modelle des Anbieters ab. Scheitert das, meldet er später bei jeder Anfrage
+  „no keys found for provider". Die eigentliche Ursache steht nur in seinem Start-Log — hier: Anthropic verlangt,
+  dass der Key zu einem Workspace gehört. Unsere Meldung nennt deshalb beide Möglichkeiten und den Neustart des
+  Gateways nach einer Änderung.</p>
+</div>
+
+<h3>Der erste echte Durchlauf (19.09.2026)</h3>
+
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Plan §8.3</span></div>
+  <h4>Jede echte Zusammenfassung scheiterte am Ausgabe-Schema</h4>
+  <p>Der Anbieter lehnt ein striktes JSON-Schema ab, wenn nicht jedes Objekt <code>additionalProperties: false</code>
+  sagt. Pydantic schreibt das nur mit <code>extra="forbid"</code>. Kein Test konnte es finden — alle liefen gegen
+  den Fake, und bis heute gab es keinen gültigen Schlüssel.</p>
+  <span class="label">Behoben, test-first</span>
+  <p>Ein Test prüft das Schema in der tatsächlich gesendeten Anfrage; er scheiterte genau so. Alle Ausgabe-Modelle
+  erben jetzt von <code>Strict</code>. Danach live geprüft: Summary und Sentiment kommen vom echten Modell zurück
+  (Zusammenfassung des ArjanCodes-Videos: 7.209 Token rein, 721 raus, 3,2 Cent).</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Gateway</span></div>
+  <h4>Der Virtual Key hatte keinen Provider-Schlüssel</h4>
+  <p>Bifrost v2 ordnet einem Virtual Key Provider-Schlüssel nur zu, wenn <code>allow_all_keys</code> gesetzt ist oder
+  Schlüssel-IDs genannt sind. Ohne das antwortet jede Anfrage „no keys found for provider" — dieselbe Meldung wie bei
+  einem ungültigen Anthropic-Schlüssel. Gefunden über die Verwaltungs-API des Gateways; <code>config/bifrost.json</code>
+  setzt jetzt <code>allow_all_keys: true</code>. Die Beschränkung auf das eine Modell (<code>allowed_models</code>)
+  bleibt, geprüft: ein anderes Modell bekommt 403.</p>
+  <span class="label">Verworfen</span>
+  <p>Zwei Vermutungen, beide live widerlegt, bevor die Ursache feststand: der gespeicherte Config-Store und
+  Alias-gegen-datierte-Modell-ID.</p>
+</div>
+
+<h3>Design- und Praxis-Durchgang (20.09.2026)</h3>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Manifest §5.5</span></div>
+  <h4>Die Markenfarbe des Creators war ungeprüft — im Dunkelmodus unlesbar</h4>
+  <p>Links, Knöpfe und Fokusrahmen trugen die Akzentfarbe unverändert. Ein dunkler Akzent (der Standard
+  <code>#333333</code>) verschwand auf dunklen Seiten, ein heller auf weißen Mails; weiße Knopfschrift auf
+  hellem Knopf ebenso. Der Creator sieht das nie, weil sein Rechner in einem der beiden Modi steht.</p>
+  <span class="label">Behoben, test-first</span>
+  <p><code>app/branding.py</code> leitet ab, was gelesen werden muss: die Linkfarbe wandert entlang ihres
+  eigenen Farbtons, bis sie WCAG AA erreicht, die Knopfschrift wird schwarz oder weiß. Die Marke selbst bleibt
+  auf Flächen und Linien. 31 Tests über acht Beispielfarben und beide Untergründe; im Browser hell und dunkel
+  geprüft, auch mit einer extremen Marke (Gelb).</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">db/models.py</span></div>
+  <h4>Ein geleerter Snapshot war JSON-<code>null</code>, nicht SQL-<code>NULL</code></h4>
+  <p>Beim Verschieben wird <code>render_snapshot</code> geleert. SQLAlchemy schrieb dafür in die JSONB-Spalte
+  ein JSON-<code>null</code>. Python liest in beiden Fällen <code>None</code>, aber jede Abfrage mit
+  <code>IS NULL</code> hätte diese Zeilen übersehen. Gefunden beim Nachsehen in der echten Datenbank nach einem
+  Verschieben. <code>JSONB(none_as_null=True)</code>, Test auf SQL-Ebene, keine Migration nötig.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Mails, Seiten</span></div>
+  <h4>Schriftgrößen und gedämpfte Farben</h4>
+  <p>Fußzeilen standen auf 12,8 px und die gedämpfte Farbe war für den Dunkelmodus nie angepasst. Jetzt
+  mindestens 16 px überall, Hierarchie über Farbe und Fettung; <code>--muted</code> hat im Dunkelmodus einen
+  eigenen Wert, und <code>--bg</code> hatte dort einen durchsichtigen Farbwert (Tippfehler) — beides behoben.</p>
+</div>
+
 <h2 id="abweichungen">3. Abweichungen vom Plan</h2>
 <p class="meta">Bewusste Abweichungen von der Spezifikation, mit Begründung.</p>
 
@@ -821,6 +951,22 @@ gescheitert. Die geänderten Planstellen tragen den Marker „<em>Changed 2026-0
   <span class="label">Nachtrag 18.09. (Code-Review)</span>
   <p>Behoben statt hingenommen: Das 429 ist jetzt eine Seite bzw. ein Fragment, und die Anmeldeseite sagt htmx per
   <code>htmx-config</code>, ein 429 einzusetzen. Ohne JavaScript sah man vorher rohes JSON.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §9.2, §17</span></div>
+  <h4>Neuplanen bei geändertem Zeitversatz kommt mit M7, nicht mit M6</h4>
+  <p>Der einzige Aufrufer ist die Einstellungsseite (M7). Mit dir am 18.09.2026 entschieden: Funktion, Test
+  und Aufrufer entstehen zusammen. Die gemeinsame Regel „neuer Zeitplan = neuer Token, zurück auf
+  <code>scheduled</code>, Snapshot leer" steckt schon im Verschieben.</p>
+</div>
+
+<div class="entry minor">
+  <div class="tags"><span class="tag minor">klein</span><span class="tag">Backlog</span></div>
+  <h4>Kein gemeinsamer Helfer <code>send_or_undo</code></h4>
+  <p>Der Backlog nannte die M6-Vorschau als dritten Fall von „nach der Antwort senden, bei Fehler zurücknehmen".
+  Sie ist keiner: Der Worker schickt sie innerhalb seiner Transaktion, ein Fehler rollt zurück und wiederholt.
+  Mit dir entschieden; der Auslöser im Backlog nennt jetzt das Kontaktformular (M8).</p>
 </div>
 
 <h2 id="kompromisse">4. Kompromisse</h2>
@@ -900,14 +1046,16 @@ jeweils genannten Standard weiter.</p>
   (deine eigene genügt), sonst läuft jede Kontaktmail als Hard-Bounce gegen genau den Versand-Ruf, den §11 schützt.</p>
 </div>
 
-<div class="entry open">
-  <h4>2. Abmeldung während eines laufenden Versands</h4>
+<div class="entry">
+  <h4>2. Abmeldung während eines laufenden Versands — entschieden: Die Momentaufnahme gilt</h4>
   <p>§9.2 nimmt die Empfängerliste als Momentaufnahme beim Versandstart. Wer sich abmeldet, während das Mailing
   sendet, bekommt diese eine Mail also noch — normalerweise Sekunden Zeitfenster, bei einem wiederholenden
   Versand aber Stunden.</p>
   <span class="label">Annahme</span>
   <p>Akzeptabel. Die Alternative (jeden Batch neu filtern) bricht das Einfrieren des Inhalts, auf dem die
-  Exactly-once-Zusage beruht. Bitte bestätigen.</p>
+  Exactly-once-Zusage beruht.</p>
+  <span class="label">Entschieden am 18.09.2026</span>
+  <p>Ja, so. Ein Test hält es fest; Plan §20 Frage 9 ist entsprechend markiert.</p>
 </div>
 
 <div class="entry open">

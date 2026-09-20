@@ -23,7 +23,8 @@
             "provider": "anthropic",
             "allowed_models": [
               "claude-sonnet-4-5"
-            ]
+            ],
+            "allow_all_keys": true
           }
         ]
       }
