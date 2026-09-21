@@ -12,7 +12,7 @@
 
 **Was wir bauen:** Eine Plattform, die öffentlich gesprochene Inhalte — YouTube-Videos und Podcast-Episoden — automatisch transkribiert, mit KI analysiert und daraus zwei klar getrennte Produkte macht:
 
-1. **Fan-Engagement für Creator:** Einige Tage nach jedem neuen Video bzw. jeder neuen Episode bekommen die eingetragenen Fans automatisch eine Zusammenfassung per E-Mail, ergänzt um eine Stimmungsanalyse der Kommentare. Der Zeitversatz ist Absicht: Das Original wird zuerst gesehen, die Zusammenfassung kommt als Nachklang. Der Creator zahlt, gestaffelt nach Größe seiner Fan-Liste. Der Creator hat null Zusatzaufwand.
+1. **Fan-Engagement für Creator:** Einige Tage nach jedem neuen Video bzw. jeder neuen Episode bekommen die eingetragenen Fans automatisch eine Zusammenfassung per E-Mail, ergänzt um eine Stimmungsanalyse der Kommentare. Der Zeitversatz ist Absicht: Das Original wird zuerst gesehen, die Zusammenfassung kommt als Nachklang. Der Creator zahlt, gestaffelt nach der Zahl der Mails, die wir in seinem Namen verschicken (4.3). Der Creator hat null Zusatzaufwand.
 2. **Gäste-Briefing für Interviewer:** Ein Interviewer gibt den Namen seines nächsten Gastes ein und bekommt ein Briefing über dessen öffentliche Auftritte der letzten Monate — Themen, Positionen, bereits gestellte Fragen — über YouTube und Podcasts hinweg.
 
 **Warum es funktioniert:** Beide Produkte laufen auf derselben technischen Pipeline (Quelle → Transkript → KI-Analyse → Ausgabe), sprechen aber unterschiedliche Kaufmotive an: Fanbindung auf der einen, Zeitersparnis bei der Recherche auf der anderen Seite. Viele Kunden des einen Produkts sind natürliche Kunden des anderen.
@@ -29,7 +29,7 @@
 
 Ausgangspunkt war ein Service für große YouTuber (z. B. aus dem Bereich Politik, Gesellschaft, komplexere Themen), der ihre Abonnenten enger an den Kanal bindet, ohne dass der YouTuber selbst zusätzlichen Aufwand hat.
 
-Fans tragen sich mit ihrer E-Mail-Adresse in eine Liste ein. Nach jedem neuen Video bekommen sie automatisch Mehrwert-Content dazu (Start: eine Zusammenfassung). **Bezahlt wird von den Creatorn selbst, nicht von den Fans** — gestaffelt nach Anzahl der Abonnenten in der Liste. Der Gedanke: Für einen großen Kanal ist Marketing/Fan-Bindung schwierig, ein solcher Service ist ein leicht buchbarer Zusatz-Mehrwert für die eigene Community.
+Fans tragen sich mit ihrer E-Mail-Adresse in eine Liste ein. Nach jedem neuen Video bekommen sie automatisch Mehrwert-Content dazu (Start: eine Zusammenfassung). **Bezahlt wird von den Creatorn selbst, nicht von den Fans** — gestaffelt nach versendeten Mails, also nach Listengröße mal Beiträgen (4.3). Der Gedanke: Für einen großen Kanal ist Marketing/Fan-Bindung schwierig, ein solcher Service ist ein leicht buchbarer Zusatz-Mehrwert für die eigene Community.
 
 Langfristig: eine **zentrale, weiße Plattform**, die für mehrere Creator gleichzeitig funktioniert, personalisierbar (Branding) pro Kanal, mit einem gemeinsamen Login für Fans, die mehrere Kanäle abonniert haben.
 
@@ -95,7 +95,7 @@ Zwei Beobachtungen, die das Geschäftsmodell tragen:
 
 ### 3.1 Produkt 1 — Fan-Engagement für Creator
 
-Der bestehende Kern der Idee. Ein Creator (YouTuber oder Podcaster) bietet seinen Abonnenten automatische Video-/Episoden-Zusammenfassungen per E-Mail plus Kommentar-Sentiment-Analyse. Bezahlt wird vom Creator, gestaffelt nach Abonnentenzahl.
+Der bestehende Kern der Idee. Ein Creator (YouTuber oder Podcaster) bietet seinen Abonnenten automatische Video-/Episoden-Zusammenfassungen per E-Mail plus Kommentar-Sentiment-Analyse. Bezahlt wird vom Creator, gestaffelt nach versendeten Mails (4.3).
 
 **Feature 1: Automatische Zusammenfassung per E-Mail**
 - Ablauf: neues Video / neue Episode wird erkannt → Transkript wird geholt → LLM erstellt Zusammenfassung → E-Mail geht an alle Abonnenten der Liste raus, mit einem „Online ansehen"-Link.
@@ -150,7 +150,7 @@ Hier wird die Öffnung auf Podcasts sogar zum echten Mehrwert: Personen treten n
 
 **Warum das ein eigenes Produkt ist und kein Feature von Produkt 1**
 - Anderer Käufer, anderes Motiv: Zeitersparnis bei der Recherche statt Fanbindung.
-- Anderes Preismodell: pro Nutzung statt monatlich nach Listengröße.
+- Anderes Preismodell: pro Briefing statt monatlich nach versendeten Mails.
 - Kein Vertragspartner nötig: Der Interviewer kauft selbst, sofort, ohne Onboarding. Das macht Produkt 2 zum schnellsten Weg zu ersten Umsätzen und zum idealen Türöffner für Produkt 1 (siehe 3.3).
 
 ### 3.3 Warum beide Produkte zusammengehören
@@ -184,7 +184,7 @@ Zielgruppen konkret:
 
 | Produkt | Zahler | Modell | Warum so |
 |---|---|---|---|
-| Fan-Engagement | Creator | Monatlicher Fixpreis, gestaffelt nach Anzahl der Abonnenten in der Liste | Planbar für beide Seiten; wächst mit dem Nutzen, den der Creator hat; einfach zu erklären |
+| Fan-Engagement | Creator | Monatspreis aus einer öffentlichen Staffel nach versendeten Mails je Kalendermonat (Listengröße × Beiträge), nachträglich abgerechnet | Deckt die echten Kosten, die ab wenigen hundert Fans überwiegend Mailversand sind; wächst mit dem Nutzen; jeder startet in der kleinsten Stufe; einfach zu erklären |
 | Gäste-Briefing | Interviewer | Preis pro Briefing; alternativ Monats-Abo mit Kontingent für Vielnutzer | Kein Onboarding, sofortiger Kauf, Preis direkt an den gesparten Stunden messbar |
 
 Fans zahlen nie. Das bleibt eine Grundregel, weil die Liste sonst nicht wächst und der Creator dann nichts hat, wofür er zahlen würde.
@@ -204,7 +204,7 @@ Fazit: Die variablen Kosten pro Beitrag sind niedrig und gut vorhersagbar. Der t
 
 Die konkreten Zahlen sind eine Hypothese für die Gespräche mit den ersten Partnern und werden dort validiert, nicht vorher festgelegt. Die Struktur steht:
 
-- **Produkt 1:** drei bis vier Stufen nach Listengröße (z. B. bis 1.000 / bis 10.000 / bis 50.000 / darüber individuell), monatlich, kündbar. Die Staffel wächst mit dem Wert, den die Liste für den Creator hat.
+- **Produkt 1** *(geändert am 21.09.2026)*: Stufen nach **versendeten Mails je Kalendermonat** — Zusammenfassungen und Bestätigungsmails —, nicht nach Listengröße allein. Grund: Die Mailkosten sind Listengröße *mal* Beiträge; zwei Kanäle mit gleicher Liste unterscheiden sich um den Faktor 30, wenn einer täglich und einer monatlich veröffentlicht. Ziel des Preises ist Kostendeckung plus eine kleine Aufwandsentschädigung, kein Wertpreis. Einstieg 5 € (bis 2.000 Mails), darüber 9 / 15 / 29 / 55 / 99 / 179 € bis 200.000 Mails, darüber individuell. Die Staffel steht an genau einer Stelle der zentralen Konfiguration; Verkaufsseite und Abrechnung lesen dieselbe Tabelle. Der Betreiber kann den Preis je Creator von Hand setzen, auch auf 0 €; der Creator sieht dann beides, den vereinbarten und den Listenpreis.
 - **Produkt 2:** ein Einzelpreis pro Briefing im Bereich einer guten Arbeitsstunde eines Journalisten, plus ein Abo für Redaktionen und Vielinterviewer.
 - **Pilotphase:** Der allererste Creator bekommt einen deutlich rabattierten, aber nicht kostenlosen Pilotpreis. Kostenlos validiert keine Zahlungsbereitschaft; ein symbolischer Preis schon.
 - **Umsatzbeteiligung** (ähnlich Patreon) bleibt als Alternative im Hinterkopf, ist aber für den Start zu komplex — Fixpreise sind erklärbar und abrechenbar.
@@ -213,17 +213,20 @@ Die konkreten Zahlen sind eine Hypothese für die Gespräche mit den ersten Part
 
 Der Bezahlvorgang ist Teil des ersten Eindrucks. Ein Creator, der zahlt, muss jederzeit verstehen, wofür, wie viel und wie er wieder rauskommt. Regeln, die ab dem ersten zahlenden Kunden gelten:
 
-- **Preise stehen öffentlich auf der Website.** Keine „Preis auf Anfrage", keine versteckten Gebühren. Die Staffel nach Listengröße ist auf einen Blick erklärbar.
+- **Preise stehen öffentlich auf der Website.** Keine „Preis auf Anfrage", keine versteckten Gebühren. Die Staffel nach versendeten Mails ist auf einen Blick erklärbar; ein Rechenbeispiel zeigt, wo ein typischer Kanal landet — als Prognose gekennzeichnet, denn auf einer Rechnung steht nie eine Annahme, nur Gezähltes.
+- **Abgerechnet wird nachträglich** *(neu am 21.09.2026)*: eine Rechnung nach sechs Monaten oder sobald 100 € aufgelaufen sind. Kleine Beträge werden selten eingezogen, weil die Zahlungsgebühr einen festen Anteil hat; das Ausfallrisiko trägt der Betreiber bewusst.
+- **Keine Blackbox** *(neu am 21.09.2026)*: Der Creator sieht in seinem Bereich jederzeit den laufenden Monat, seine Stufe, was aufgelaufen ist, wann spätestens abgerechnet wird, und jeden abgerechneten Monat einzeln je Mailing. Was er uns kostet, sieht er nie.
+- **Wer nicht zahlt, wird pausiert — angekündigt und erklärt** *(neu am 21.09.2026)*: eine Vorwarnung, dann die Pause mit Grund und Bezahl-Link per Mail und im Creator-Bereich; nach Zahlung läuft alles von selbst weiter. Die Liste bleibt unberührt und exportierbar.
 - **Monatlich, jederzeit kündbar, mit einem Klick.** Keine Mindestlaufzeit, keine Kündigungshürden. Wer kündigt, behält den Zugang bis Monatsende.
-- **Kein Stufen-Sprung ohne Ankündigung.** Wächst die Liste über eine Preisstufe hinaus, wird der Creator vorher informiert; die neue Stufe gilt ab dem nächsten Monat. Keine Überraschungen auf der Rechnung.
+- **Kein Stufen-Sprung ohne Ankündigung.** *(Geändert am 21.09.2026:)* Die Stufe ergibt sich aus dem, was im Monat tatsächlich verschickt wurde; rutscht ein Creator im laufenden Monat in eine höhere Stufe, bekommt er in dem Moment eine Nachricht, und sein Bereich zeigt es ohnehin. Keine Überraschungen auf der Rechnung.
 - **Rechnung automatisch als PDF**, mit allen Pflichtangaben, im Kundenbereich abrufbar und per Mail zugestellt.
-- **Zahlung über einen etablierten Dienstleister** (Stripe: Checkout für Briefings, Billing für Creator-Abos). Wir speichern keine Kartendaten. Nicht selbst bauen.
+- **Zahlung über einen etablierten Dienstleister** (Stripe: Rechnungen für Creator, Checkout für Briefings). Wir speichern keine Kartendaten. Nicht selbst bauen. Den Betrag rechnen wir, Stripe verschickt, zieht ein, mahnt und erzeugt das PDF.
 - **Deine Liste gehört dir.** Der Creator exportiert seine bestätigten Abonnenten jederzeit als CSV, auch nach Kündigung. Danach löschen wir die Daten. Das steht im Vertrag und auf der Verkaufsseite, weil es das stärkste Vertrauensargument ist, das wir haben.
 - **Testphase statt Verkaufsdruck (ab Phase 2, Self-Service).** Ein neuer Creator kann den Service für einen definierten Zeitraum ohne Zahlung mit seiner echten Liste ausprobieren; danach entscheidet er. Der Pilot in Phase 1 zahlt dagegen von Anfang an einen symbolischen Preis (4.3), weil dort die Zahlungsbereitschaft geprüft wird.
 
 Phasen:
-- MVP: manueller Vertrag mit dem Pilotpartner, Rechnung per Hand. Keine automatisierte Abrechnung — die Regeln oben gelten trotzdem sinngemäß (klarer Preis, klare Kündigung).
-- Ab Phase 2: Stripe-Anbindung, Self-Service-Abschluss auf der Website, automatische Rechnungen.
+- MVP *(geändert am 21.09.2026)*: manueller Vertrag mit dem Pilotpartner; die Rechnung erzeugt das System über Stripe aus gezählten Mails. Kein Checkout, keine gespeicherten Zahlungsmittel, kein Self-Service.
+- Ab Phase 2: Self-Service-Abschluss auf der Website, Checkout für Briefings.
 
 ---
 
@@ -307,6 +310,7 @@ Bewusst klein gehalten. Ziel: schnell etwas Vorzeigbares und Zahlendes haben, mi
 - **Feature 1:** automatische Zusammenfassung per E-Mail nach jedem neuen Beitrag, inklusive „Online ansehen"-Seite.
 - **Feature 2:** Kommentar-Sentiment, sofern der Creator auf YouTube veröffentlicht.
 - **Sign-up-Seite** für den Kanal mit Double-Opt-in, Abmelde-Link in jeder Mail.
+- **Abrechnung** *(neu am 21.09.2026)*: Staffel nach versendeten Mails, Stripe-Rechnung nachträglich, Abrechnungsseite für den Creator, automatische Pause bei Nichtzahlung, Kostenübersicht je Creator für den Betreiber, Frühwarnungen vor jedem Limit, das den Dienst anhalten kann (4.3, 4.4).
 - **Landingpage** mit Demo-Material, Preisstaffel, Feature-Vorschau (5.6) und Kontaktformular.
 - **Zeitversatz** pro Kanal einstellbar (Standard sieben Tage, Minimum 48 Stunden), Vorschau mit Stopp-Fenster vor jedem Versand.
 - **Einstellungsseite für den Creator** per Magic-Link (5.1, Bereich C), inklusive CSV-Export seiner Abonnenten.
@@ -322,7 +326,7 @@ Bewusst klein gehalten. Ziel: schnell etwas Vorzeigbares und Zahlendes haben, mi
 - Kein Diskussionsbereich.
 - Kein Fan-Dashboard, kein Fan-Login.
 - Keine Mandantenfähigkeit im Sinne von Self-Service-Onboarding — erst mal ein Kanal, ein Setup; die Datenhaltung ist aber von Anfang an pro Creator getrennt, damit Phase 2 kein Umbau ist.
-- Keine ausgefeilte Bezahl-Logik — ein manueller/vertraglicher Deal mit dem ersten Partner, keine automatisierte Abrechnung.
+- Kein Checkout, keine Abos, kein Self-Service-Abschluss — der Vertrag mit dem ersten Partner entsteht im Gespräch. *(Geändert am 21.09.2026: Die Rechnung selbst ist automatisiert, siehe 6.1.)*
 - Kein Briefing, auch nicht als Demo. Der Pilot wird über den persönlichen Kontakt und echte Demo-Mails gewonnen. Briefing und Podcast-Connector kommen zusammen in Phase 2.
 
 ### 6.3 Wann der MVP „fertig" ist
@@ -474,7 +478,7 @@ Eine Empfehlung, keine Festlegung — aber jede Abweichung sollte einen Grund ha
 | LLM | Anthropic-Modelle als Start, hinter **Bifrost** als Gateway | Siehe Abschnitt 8 |
 | Speech-to-Text | Whisper über API-Dienst | Standard, mehrsprachig, günstig, kein eigener Betrieb |
 | E-Mail | Resend oder Postmark | Transaktions-Mail mit Zustellbarkeit, Webhooks für Öffnungs-/Klickraten |
-| Zahlungen (ab Phase 2) | Stripe | Checkout für Briefings, Billing für Abos |
+| Zahlungen | Stripe | Rechnungen für Creator ab dem MVP; Checkout für Briefings ab Phase 2 |
 | Hosting | Railway oder Render: Web-Prozess, Worker-Prozess und verwaltete Postgres in einem Projekt; eine Umgebung | Deploy per `git push`, kein Server-Betrieb; Skalierung ist ein Phase-3-Thema |
 | Beobachtbarkeit | Strukturierte Logs, Fehler-Tracking (z. B. Sentry) | Genug, um nachts zu schlafen |
 
@@ -624,7 +628,10 @@ Getroffene Entscheidungen, damit sie nicht erneut diskutiert werden. Stand: 9. S
 | Zeitversatz | Standard 7 Tage nach Veröffentlichung, vom Creator einstellbar, Minimum 48 Stunden | Original zuerst; Kommentare brauchen Zeit; Werte zentral konfigurierbar |
 | Konfiguration | Eine zentrale Datei für alle wichtigen Einstellungen; Geheimnisse aus Umgebungsvariablen; Kanal-Werte in der Datenbank | Wartbarkeit, keine verstreuten Einstellungen |
 | Website | Statische Verkaufsseite mit echter Beispiel-Mail, öffentlichen Preisen und Feature-Vorschau aus einer Datei | Seriöser erster Eindruck, Vorschau als Bindungsargument |
-| Bezahlung | Öffentliche Preise, monatlich kündbar, Stufenwechsel mit Vorankündigung, Stripe ab Phase 2, Rechnung als PDF | Einfach, transparent, seriös |
+| Bezahlung | Öffentliche Preise, monatlich kündbar, Stufenwechsel mit Nachricht, Rechnung als PDF. *Geändert am 21.09.2026:* Stripe-Rechnungen schon im MVP | Einfach, transparent, seriös |
+| Preismodell (21.09.2026) | Staffel nach versendeten Mails je Kalendermonat statt nach Listengröße; Einstieg 5 €; kostendeckend plus kleine Entschädigung; Handpreis je Creator möglich, auch 0 € | Mailversand ist der Kostentreiber, und er ist Liste × Beiträge; gezählt statt geschätzt |
+| Abrechnung (21.09.2026) | Nachträglich, nach sechs Monaten oder ab 100 €; nur Stripe; täglicher Abgleich statt Webhook; automatische Pause nach Vorwarnung, automatische Fortsetzung nach Zahlung | Kleine Beträge selten einziehen; Risiko je Kunde gedeckelt; keine öffentliche Angriffsfläche |
+| Frühwarnungen (21.09.2026) | Jedes Limit, das den Dienst anhalten kann, meldet sich vorher im Log; Anmeldeformular mit Honeypot und Tagessperre je Creator | Transparenz für den Betreiber; Schutz des gemeinsamen Versand-Rufs |
 | Produktname | Klartext (vorläufig); Fazit, Kurzum, Gesagt als Alternativen | Stark und seriös; Domain und Marke noch zu klären (Anhang 15) |
 | E-Mail-Fingerabdruck | Fester Rahmen mit Creator-Kopf und Plattform-Fuß; Creator passt genau zwei Sätze an (Begrüßung, Abschied), reiner Text | Fan erkennt sofort Creator und Plattform; persönliche Note ohne Editor-Komplexität |
 | Phase 0 | Nur YouTube-Connector; kein Podcast, kein Demo-Briefing | Pilot steht fest; Podcast und Briefing kommen zusammen in Phase 2 |

@@ -69,6 +69,27 @@ Diese Befehle nehmen auf und berichten — Pipeline-Schritte führt nur der
 Worker aus. Sie sprechen mit YouTube beziehungsweise dem LLM-Gateway; ohne den
 passenden Schlüssel brechen sie mit einer Meldung ab, die sagt, welcher fehlt.
 
+### Grenzen, an die der Betrieb stoßen kann
+
+**YouTube-Quota.** Google gibt jedem Projekt 10.000 Einheiten am Tag,
+kostenlos; mehr gibt es nur auf Antrag (Formular in der Google Cloud Console,
+Bearbeitung dauert Wochen). Zurückgesetzt wird um Mitternacht Pacific, also
+gegen 09:00 Uhr Berliner Zeit. Ist das Kontingent aufgebraucht, geht nichts
+verloren: Der Worker parkt die betroffenen Videos, schreibt
+`operator.action_needed` ins Log und macht nach dem Reset von selbst weiter.
+
+Grobe Rechnung, wann es eng wird:
+
+| Betriebsart | Einheiten je Video | Grenze etwa bei |
+|---|---|---|
+| offizielle Untertitel (Creator hat YouTube verbunden) | ≈ 255 (50 Liste + 200 Download + Metadaten, Kommentare, Nachprüfung) | **39 neue Videos am Tag** über alle Creator — rund 39 täglich oder 270 wöchentlich veröffentlichende Kanäle |
+| nur inoffizielle Untertitel | ≈ 5 | praktisch nie |
+
+Jeder Aufruf steht mit seinen Einheiten im Log (`grep quota.youtube`). Eine
+Warnung bei 70 % und ein Alarm bei 90 % des Tageskontingents sind geplant
+(`docs/plans/2026-09-billing-plan.md` §6, Meilenstein M7a) — bis dahin ist die Quota-Grafik der Google Cloud
+Console die Frühwarnung.
+
 ## Schlüssel und ihre Rechte
 
 `.env.example` zeigt alle Variablen, gruppiert danach, wann sie gebraucht
@@ -167,7 +188,7 @@ Umgebungsvariable mit doppeltem Unterstrich überschreiben, etwa
 | `src/app/` | `sources/` → `transcripts/` → `analysis/` → `delivery/`, dazu `jobs/` (Pipeline), `web/`, `worker.py` |
 | `tests/` | Unit- und Integrationstests, Fakes in `fakes.py` |
 | `docs/manifest/` | Die Spezifikation |
-| `docs/plans/` | Implementierungspläne, Fortschritt in §17 |
+| `docs/plans/` | Implementierungspläne: der MVP-Plan (Fortschritt in §17) und der Abrechnungsplan `2026-09-billing-plan.md` (Preis, Rechnung, Pause, Frühwarnungen) |
 | `docs/backlog.md` | Alles, was bewusst nach dem MVP kommt — mit dem Auslöser, ab dem es sich lohnt |
 | `docs/ARCHITECTURE.md` | Modulschnitt, Entscheidungen, „Wo finde ich was" |
 | `implementation-notes.html` | Wo die Umsetzung vom Plan abweicht und warum |
@@ -187,10 +208,11 @@ verworfener Commit nach einem Datenbankfehler und ein Versand, der trotz
 Erfolgs als gescheitert enden konnte).
 
 Es fehlen **M7 bis M9**: Einstellungsseite, Verkaufsseite, Deployment; der echte
-Bounce-Webhook wird mit dem Deployment abgenommen (M9). Ebenfalls offen und
-bewusst nicht gebaut: **wie das Geld fließt.** Der MVP sieht laut Manifest §4.4
-einen Vertrag und eine Rechnung von Hand vor; was ein einzelner Kunde kostet,
-lässt sich aus `llm_calls` und `deliveries` ableiten (siehe `docs/backlog.md`).
+Bounce-Webhook wird mit dem Deployment abgenommen (M9). Ebenfalls geplant, noch
+nicht gebaut: **wie das Geld fließt** (`docs/plans/2026-09-billing-plan.md`, Meilensteine M7a und M7b). Der
+Preis folgt einer öffentlichen Staffel nach versendeten Mails je Monat,
+abgerechnet wird nachträglich über Stripe, und der Betreiber sieht je Creator,
+was dieser kostet — gezählt aus `llm_calls` und `mailings`, nicht geschätzt.
 Fortschritt je Meilenstein in §17 des Plans.
 
 Sprache: Code, Kommentare und Logs auf Englisch; diese Datei und alles, was Fans

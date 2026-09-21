@@ -1,10 +1,18 @@
 # MVP Implementation Plan — Creator Platform (Phase 0 + Phase 1)
 
-> **Progress:** M0–M4 built, tested and reviewed (2026-09-11); M5 built, reviewed and hardened (2026-09-18, webhook acceptance moved to M9); M6 built, accepted live and hardened after a code review (2026-09-20); M7–M9 not started. Per-milestone detail in §17.
+> **Progress:** M0–M4 built, tested and reviewed (2026-09-11); M5 built, reviewed and hardened (2026-09-18, webhook acceptance moved to M9); M6 built, accepted live and hardened after a code review (2026-09-20); M7–M9 not started; M7a and M7b (usage, pricing, billing) added 2026-09-21, not started — specified in their own plan, [`2026-09-billing-plan.md`](2026-09-billing-plan.md). **Next step: M7.** Per-milestone detail in §17.
 >
 > **Status:** draft for review · **Date:** 2026-09-10, revised 2026-09-11 after a full review against the manifest (14 findings; the changed passages are marked "§R" in `implementation-notes.html`) · **Source of truth:** `docs/manifest/creator-plattform-manifest.md` (the manifest). Every task below cites the manifest section it implements. What is not in the manifest is not built.
 >
 > **Scope:** the MVP as defined in manifest §6 (Phase 1), reached through the Phase 0 demo (manifest §10). Product 2 (briefings), the podcast connector, Whisper, payments, fan login and dashboards are explicitly out of scope. **Everything deferred beyond the MVP — by a decision in this plan, a review, or a `# ponytail:` shortcut in the code — is collected in `docs/backlog.md`, each item with the trigger that justifies building it.**
+>
+> **Decisions taken with the owner on 2026-09-21** (pricing workshop). **The whole topic has its own plan: `docs/plans/2026-09-billing-plan.md`** — decisions, data model, jobs, tests, Stripe facts, risks and questions. This plan only carries the step (M7a and M7b in §17) and the pointers. In short:
+> - **Invoicing moves into the MVP** — *Changed 2026-09-21:* the scope line above still lists "payments" as out of scope; what stays out is checkout, subscriptions, stored payment methods and self-service. Stripe invoices in arrears are in.
+> - **The price covers the cost plus a small compensation.** One public tier table by mails sent per calendar month (summary and confirm mails), priced per month from measured counts, entry tier €5, owner override per creator including €0.
+> - **One invoice after six months or at €100 accrued.** The owner carries the default risk of billing in arrears. Stripe only; no webhook, a daily poll instead.
+> - **An unpaid invoice pauses the creator automatically**, after a heads-up, with the reason and the payment link on his page, and resumes on payment.
+> - **Limits are announced before they are reached:** YouTube quota and confirm-mail volume get a log warning and an alarm; confirm mails get a daily cap per creator and the sign-up form a honeypot.
+> - **Hosting and mail-provider cost are parked** for a separate review (backlog); the tier prices derive from `[costs]` and follow.
 >
 > **Decisions taken with the owner on 2026-09-18**, after a code review of M5 found security holes (details in §17 M5 and `implementation-notes.html`; every changed passage below is marked "*Changed 2026-09-18*"):
 > - **A block is permanent.** Bounce and complaint blocks mirror Resend's account-wide suppression list, which does not expire and can only be edited with a full-access API key. The app keeps a sending-only key (least privilege); the confirm-lifts-a-bounce rule of §7/§10 is dropped. Unblocking is an operator step (ARCHITECTURE.md → "The fan area").
@@ -26,6 +34,22 @@
 > - Language: all code, docstrings, comments, logs and technical docs in **English**; only `README.md` in German. User-facing texts (pages, mails) in German (manifest §3.4).
 > - HTMX is included from the start (manifest §7.8). Feature voting on the landing page (§5.6) and logo upload are deferred; the logo is a URL (default: the YouTube channel avatar).
 > - Documents live in `docs/`: plans in `docs/plans/`, concept documents in `docs/manifest/`.
+
+---
+
+## How to use this plan
+
+**This plan is the master.** Work through §17 from top to bottom, one milestone after the other: **M0 → M1 → … → M7 → M7a → M7b → M8 → M9**. A milestone is finished when its boxes are ticked, its "Done when" holds and its **Status** line says so; then the *Progress* line at the very top moves on. Everything else is reached from here:
+
+| Document | What it is for | When you need it |
+|---|---|---|
+| [`../manifest/creator-plattform-manifest.md`](../manifest/creator-plattform-manifest.md) | What to build, and why (German) | when a task cites "manifest §…" |
+| [`2026-09-billing-plan.md`](2026-09-billing-plan.md) | The detailed specification of milestones **M7a** and **M7b**: pricing, usage counting, invoices, pause, early warnings, Stripe facts | when §17 reaches M7a |
+| [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Module cut, decisions, rules of the fan area | while building, and updated at the end of every milestone |
+| [`../backlog.md`](../backlog.md) | Everything deliberately left for after the MVP, each with its trigger | when something is deferred — never as a to-do list for the MVP |
+| [`../../implementation-notes.html`](../../implementation-notes.html) | Where the build deviates from this plan and why; open questions for the owner (German) | after every milestone, and when a decision is needed |
+| [`../../README.md`](../../README.md) | Install, start, test, operate; keys; limits (German) | day to day |
+| [`../../config/settings.toml`](../../config/settings.toml) | Every tunable, with a comment | whenever a number is in question |
 
 ---
 
@@ -66,7 +90,7 @@
 
 **What the developer builds.** One Python repository, one deployment: a FastAPI web process (sign-up, confirmation, unsubscribe, the "online ansehen" page, the creator's settings page, the landing page, one webhook for bounces) and one worker process (the pipeline loop). PostgreSQL holds everything, including pipeline state. Two small abstractions keep later phases cheap: a source/transcript interface and an LLM gateway client. External services do the heavy lifting: YouTube's Data API, an LLM behind the Bifrost gateway, Resend for e-mail, Render for hosting. No queue framework, no frontend build, no admin UI — the operator uses a CLI and the logs.
 
-**What is deliberately not built.** Podcasts, briefings for interviewers, Whisper transcription, payments, fan login and dashboards, push notifications from YouTube, multi-tenant self-service. All of them are additive later; none of them is needed to earn the first euro.
+**What is deliberately not built.** Podcasts, briefings for interviewers, Whisper transcription, checkout and subscriptions (*Changed 2026-09-21:* invoicing in arrears is built — billing plan), fan login and dashboards, push notifications from YouTube, multi-tenant self-service. All of them are additive later; none of them is needed to earn the first euro.
 
 **How to read the rest.** §2 says when we are done. §3–§4 are the rules and the stack. §5–§8 describe the code you will write. §9 is the heart: the state machines and the worker. §10–§11 are the pages and the mails. §12–§16 are logging, security, tests, deployment and docs. §17 is the order of work, in ten milestones that each ship something. §18–§20 are the verified facts, the risks and the questions still open.
 
@@ -603,7 +627,7 @@ Manifest §7.8 "Beobachtbarkeit" and the owner's explicit requirement for import
 - **Context**: the request-id middleware binds `request_id`, `path`, `creator_slug` (when resolvable); the worker binds `step`, `attempt`, `appearance_id` / `mailing_id` / `creator_id` before the first log line of a step. Identify people by ids, never by e-mail address, in logs.
 - **Event vocabulary** (constants in `app/log.py`, so grep works — the constants file is the authority, ARCHITECTURE.md describes only the naming scheme): `item.detected`, `item.skipped` (reason), `item.failed`, `transcript.fetched` (origin, language, is_generated, segments, chars, duration_ms), `transcript.unavailable` (reason), `llm.call` (purpose, model, prompt_version, tokens_in, tokens_out, cost_cents, duration_ms, ok), `llm.cost_cap_hit`, `mailing.scheduled` (send_at), `mailing.sentiment_ready` (comments_used), `mailing.sentiment_skipped` (reason), `mailing.preview_sent`, `mailing.batch_sent` (size, first_delivery_id), `mailing.sent` (recipients, duration_ms), `mailing.stopped` / `postponed` / `rescheduled` / `cancelled` / `failed`, `subscription.created` / `confirmed` / `unsubscribed` / `address_rejected` (reason) / `confirm_sent` / `confirm_failed`, `subscriber.blocked` (reason; only when a row actually changes), `creator.magic_link_sent` / `magic_link_failed`, `web.hostile_path`, `web.rate_limited`, `cleanup.done` (counts), `webhook.resend` (type, signature_ok), `feed.polled` (source, entries, new), `worker.tick` (due counts, duration_ms), `step.retry` (attempt, next_attempt_at, error), `quota.youtube` (endpoint, units).
 - **Levels**: INFO for step boundaries and counts, WARNING for skips, retries, bad signatures, cost cap, DEBUG for payload sizes and provider responses (never bodies with PII), ERROR with traceback for exhausted retries → Sentry when `SENTRY_DSN` is set (`sentry-sdk` with the FastAPI and logging integrations; `send_default_pii=False`).
-- **Cost control** (manifest §7.9, §11): `llm_calls` is the ledger; `assert_under_cap` refuses calls above `daily_cost_cap_cents` per creator; `cli status` prints today's cost per creator with one `SUM … GROUP BY`. YouTube quota is not counted in code (`# ponytail: per-process counters lie across web and worker; the Google Cloud console graphs quota`) — every call logs its units, so `grep quota.youtube` gives the number when needed.
+- **Cost control** (manifest §7.9, §11): `llm_calls` is the ledger; `assert_under_cap` refuses calls above `daily_cost_cap_cents` per creator; `cli status` prints today's cost per creator with one `SUM … GROUP BY`. YouTube quota is not counted in code (`# ponytail: per-process counters lie across web and worker; the Google Cloud console graphs quota`) — every call logs its units, so `grep quota.youtube` gives the number when needed. *Changed 2026-09-21:* the units are now counted in the database, per Pacific day, with a warning and an alarm before the limit (billing plan §6) — the owner wants to know before it breaks, not when.
 - **Operational visibility without a dashboard**: `cli status` prints per creator: list size, pending/confirmed, open mailings with `send_at`, status and attempts, appearances in `failed` with `last_error`, today's LLM cost, last feed poll and cleanup run. That, the Render logs and Sentry are the MVP's monitoring (manifest: "genug, um nachts zu schlafen").
 
 ## 13. Security and data protection
@@ -751,8 +775,14 @@ open until it has been run against one, however green the tests are.
 - [ ] Tests: settings validation; saving a changed delay reschedules and rotates the stop token, saving a greeting does not; a variant switch changes the rendered mail of an open mailing without a new analysis; CSV content.
 - **Done when:** the pilot creator changes his delay and greeting himself and downloads his list.
 
+### M7a and M7b — Usage, pricing, billing (≈ 2 + 4 sessions) — *added 2026-09-21*
+Specified, with their checkboxes and "Done when", in [`2026-09-billing-plan.md`](2026-09-billing-plan.md) §9 — open that file when you get here, work through its §9 from top to bottom, and come back. The boxes are ticked there; the status line below and the *Progress* line at the top of this plan are updated when one closes.
+- **M7a — usage ledger, early warnings, operator cost view.** The ledger counts failed LLM calls; YouTube quota and confirm mails are counted in the database with a log warning before the limit; a daily cap and a honeypot protect the sign-up form; `cli costs` shows what each creator costs. No Stripe involved.
+- **M7b — pricing, invoices, pause.** Tier table in `settings.toml`, months frozen when they end, one Stripe invoice after six months or at €100, a daily status poll instead of a webhook, automatic pause and resume, the creator's billing page with the rules in five lines. Needs M7 and M7a; developed against a fake and a Stripe sandbox.
+- **Status: planned, not started, 2026-09-21.**
+
 ### M8 — Landing page and legal pages (≈ 2 sessions)
-- [ ] `landing.html` complete with the seven sections of manifest §5.5, `config/roadmap.toml` + renderer, price tiers (numbers from the owner), FAQ; `/kontakt`; `impressum`/`datenschutz` templates with owner-provided text; favicon; mobile check.
+- [ ] `landing.html` complete with the seven sections of manifest §5.5, `config/roadmap.toml` + renderer, price tiers (*Changed 2026-09-21:* rendered from `[pricing]` in `settings.toml`, the same table billing reads, with one worked example "19,000 subscribers, weekly video → tier S to M" marked as a forecast, and the five-line rules block `partials/billing_rules.html` from the billing plan §7, numbers from the settings), FAQ; `/kontakt`; `impressum`/`datenschutz` templates with owner-provided text; favicon; mobile check.
 - [ ] Tests: landing renders roadmap items by status; contact form rate-limited and relayed via the fake.
 - **Done when:** the owner approves the page on phone and desktop; Lighthouse accessibility ≥ 90.
 
@@ -762,10 +792,12 @@ open until it has been run against one, however green the tests are.
 - [ ] M5's deferred acceptance: Resend webhook on `https://<domain>/webhooks/resend` (`email.bounced`, `email.complained`), `RESEND_WEBHOOK_SECRET` set, a sign-up of `bounced@resend.dev` ends with that subscriber blocked (`blocked_reason = bounce`); then `SENDER_ADDRESS` removed.
 - [ ] Google OAuth verification submitted (homepage + privacy policy live are prerequisites — M8 must be deployed first); until approved the pilot re-consents weekly or the unofficial provider carries production.
 - [ ] Pilot onboarding via the runbook: contract signed, `cli onboard`, branding, login + YouTube connect, `backfill`, first real preview reviewed together.
+- [ ] *Added 2026-09-21 — before the first invoice, none of it blocks development:* business registered and tax number issued (small-business rule chosen); Stripe account activated (needs the live website, so after M8 is deployed); in the Stripe dashboard: tax number as default account tax id, sequential numbering with a prefix, "e-mail finalized invoices" on, reminders for one-off invoices aligned with `pause_after_days_overdue`, payment methods SEPA debit and card; restricted live key set as `STRIPE_API_KEY` on Render. Live check of what a sandbox cannot show: one real €1 invoice to the owner's own address — the mail arrives, the PDF carries number, tax number and the §19 sentence, a reminder arrives, payment flips our row to `paid`.
+- [ ] *Added 2026-09-21:* the contract names the tier table, billing in arrears, the €100 rule and the pause.
 - [ ] `docs/runbooks/operations.md` complete; README final; ARCHITECTURE.md Decisions final.
 - **Done when — Phase 1 live:** the first real mailing has gone out to the pilot's list exactly once and the acceptance criteria in §2 are all ticked.
 
-Order of work is M0 → M4 (Phase 0 demo), then M5 → M7 (automation), then M8/M9. M8 can run in parallel with M5–M7 because it shares no code with the pipeline.
+Order of work is M0 → M4 (Phase 0 demo), then M5 → M7 (automation), then M7a → M7b (*added 2026-09-21*), then M8, then M9. *Changed 2026-09-21:* strictly one after the other — M8 used to be allowed in parallel with M5–M7, but its price table and rules block now come from M7b.
 
 **Post-go-live, not MVP** (tracked in `docs/backlog.md`): PubSubHubbub push (`sources/youtube/pubsub.py`, a verification/notification route, lease renewal, tombstone handling) — purely additive, build when a creator needs sub-hour detection; the verified hub facts stay in §18.
 
@@ -819,6 +851,7 @@ Researched against primary sources on 2026-09-09/10 (docs, repositories, live en
 | Upload detected late | Poll every 6 h, feed shows 15 entries | 6 h ≪ 48 h minimum delay; `cli poll` for manual runs; push notifications are the documented post-go-live upgrade. |
 | Bifrost is an extra moving part for one provider | The gateway is a manifest decision (§8, §13) | Stateless container, pinned version, private network; the app's client is plain OpenAI-compatible HTTP, so removing or replacing the gateway is a URL change. |
 | Legal: sentiment summaries as "derived data" from API comments; storage limits | YouTube API policies III.E.4 | No raw comments stored; summaries only; recently mailed videos re-checked daily; question flagged for the lawyer (§20) before launch. |
+| *Added 2026-09-21:* Billing, sign-up floods, unannounced limits, fixed costs | Money and reputation | Five risks with their mitigations in the billing plan §11. |
 | Pilot churns | Manifest §11 | `cli status` shows open mailings and failures; a second channel is only configuration. |
 
 ## 20. Open questions
@@ -834,6 +867,9 @@ To be answered by the owner; the plan proceeds with the stated assumption until 
 7. **Postpone step**: 24 hours assumed; the manifest only says "verschieben".
 8. **A mailbox for the domain.** The plan sends but never receives. `support_email` is the reply-to fallback (§8.4) and the sole recipient of the `/kontakt` relay (§10) — the landing page's only inbound sales channel (manifest §5.5). Needed before M9: a mailbox for the apex domain and its MX record, or Resend inbound on a subdomain. Until then set `SUPPORT_EMAIL` to an existing address; with no MX, every contact mail hard-bounces against the sending reputation §11 protects. Who reads it goes into `docs/runbooks/operations.md`.
 9. **Unsubscribe during an in-flight send.** §9.2's recipient set is a snapshot taken at send start, so someone who unsubscribes while a mailing is sending still receives that one mail — seconds of exposure normally, hours if the send is retrying. Assumption: acceptable, and the alternative (re-filtering each batch) breaks the payload freeze §8.4 relies on. **Decided 2026-09-18 by the owner: the snapshot holds**; a test pins it.
+
+*Added 2026-09-21:* the questions on pricing and billing — most decided, hosting cost and the business registration open — are in the billing plan §12.
+
 
 ## 21. Review section
 

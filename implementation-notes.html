@@ -1136,6 +1136,34 @@ die kein Test mit Fakes erreicht.</p>
   Mit dir entschieden; der Auslöser im Backlog nennt jetzt das Kontaktformular (M8).</p>
 </div>
 
+<div class="entry blocking">
+  <div class="tags"><span class="tag blocking">blockierend</span><span class="tag">Abrechnungsplan · Plan §17 M7a/M7b · Manifest §4</span></div>
+  <h4>Abrechnung kommt in den MVP — und der Preis hängt an versendeten Mails, nicht an der Listengröße (21.09.2026)</h4>
+  <p>Manifest §4.4 sah für den MVP eine Rechnung von Hand vor und Stripe ab Phase 2; §4.3 staffelte nach Listengröße.
+  Beides hast du im Preis-Workshop geändert. Der Grund für die zweite Änderung steht im Code und in der
+  Preisliste des Mail-Anbieters: Die Mailkosten sind <em>Videos × Fans</em>, das LLM macht ab etwa 300 Fans den
+  kleineren Teil aus. Zwei Kanäle mit gleicher Liste unterscheiden sich um den Faktor 30, wenn einer täglich und
+  einer monatlich hochlädt.</p>
+  <span class="label">Gewählt</span>
+  <p>Eine öffentliche Staffel nach versendeten Mails je Kalendermonat (Zusammenfassungen und Bestätigungsmails),
+  Einstieg 5 €, nachträglich abgerechnet: eine Stripe-Rechnung nach sechs Monaten oder sobald 100 € aufgelaufen
+  sind. Dein Handpreis je Creator (auch 0 €) schlägt die Staffel. Bei unbezahlter Rechnung pausiert das System
+  nach Vorwarnung von selbst und läuft nach Zahlung von selbst weiter. Kein Webhook — ein täglicher Job fragt
+  Stripe. Vor jedem Limit, das den Dienst anhalten kann, steht eine Warnung im Log (YouTube-Quota,
+  Bestätigungsmails), dazu eine Tagessperre und ein Honeypot am Anmeldeformular.</p>
+  <span class="label">Was die Durchsicht des Codes ergab</span>
+  <p>Die Daten reichten für eine Abrechnung noch nicht: Fehlgeschlagene LLM-Aufrufe werden mit 0 Token gebucht,
+  <code>deliveries</code> schrumpft rückwirkend (abgemeldete Fans werden nach 30 Tagen gelöscht, ihre Zeilen mit),
+  Bestätigungsmails werden nirgends gezählt, und <code>creators</code> kennt kein „pausiert". Alles vier steht in
+  <code>docs/plans/2026-09-billing-plan.md</code> §2 und wird in M7a/M7b behoben. Dauerhaft und schon heute exakt ist
+  <code>mailings.recipient_count</code> — darauf baut die Abrechnung.</p>
+  <span class="label">Verworfene Alternative</span>
+  <p>Ein Pauschalpreis aus angenommenen 3 % der Abonnenten: überteuert genau dann, wenn der Dienst wenig bringt,
+  und unterdeckt genau dann, wenn er teuer wird — und die Listengröße müssen wir nicht annehmen, wir zählen sie.
+  Die 3 % bleiben als Prognose im Verkaufsgespräch. Ebenfalls verworfen: Abrechnung je Mail (Taxameter, steht im
+  Backlog) und Stripe-Abos (wollen einen festen Betrag).</p>
+</div>
+
 <h2 id="kompromisse">4. Kompromisse</h2>
 <p class="meta">Erwogene Alternativen und warum die gewählte Lösung gewonnen hat.</p>
 
@@ -1328,4 +1356,65 @@ jeweils genannten Standard weiter.</p>
   </ul>
   <span class="label">Entschieden am 18.09.2026</span>
   <p>Ja, so umsetzen. Steht als Aufgabe in der M9-Checkliste des Plans (§17).</p>
+</div>
+
+<div class="entry">
+  <h4>13. Wenn ein Creator eine Rechnung anzweifelt — entschieden</h4>
+  <p>Seine Seite zeigt jeden abgerechneten Monat einzeln: je Mailing Datum, Videotitel und Empfängerzahl, dazu die Bestätigungsmails — eingefroren zum Monatsende, damit spätere Abmeldungen nichts mehr verändern.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Bleibt er dabei, entscheidest du und korrigierst per Gutschrift im Stripe-Dashboard. Kein Widerspruchs-Workflow in der App (Abrechnungsplan §12 Frage 10).</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Ja, so umsetzen: Einzelaufstellung auf seiner Seite, Gutschrift von Hand im Stripe-Dashboard.</p>
+</div>
+
+<div class="entry">
+  <h4>14. Jeder Kalendermonat wird für sich bepreist — nicht der Durchschnitt des Zeitraums — entschieden</h4>
+  <p>Im Workshop sprachen wir vom Durchschnitt über sechs Monate. Beim Ausarbeiten der 100-€-Regel zeigte sich: Sie beendet Zeiträume vorzeitig, und ein Durchschnitt über einen angebrochenen Zeitraum ist nicht definiert. Eine Zeile je Monat („Oktober · 1.840 Mails · Stufe S · 5 €“) lässt sich außerdem einzeln nachprüfen. Folge: Wer nah an einer Stufengrenze liegt, kann von Monat zu Monat die Stufe wechseln.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Monatsweise (Abrechnungsplan §1 Punkt 2, §12 Frage 11).</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Einverstanden — unter der Bedingung, dass der Creator die Regeln auf seiner Seite vollständig, kurz und verständlich findet: fünf Zeilen, keine versteckte Regel (Abrechnungsplan §7). „Zu viel Text liest keiner.“</p>
+</div>
+
+<div class="entry">
+  <h4>15. Ein Monat ganz ohne Mail kostet die kleinste Stufe (5 €) — entschieden</h4>
+  <p>„Bis 2.000 Mails“ schließt null ein; der Betrag trägt die Fixkosten.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>So wie beschrieben. Alternative: ein Monat ohne Versand ist frei (Abrechnungsplan §12 Frage 12).</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Ja, 5 € — keine Sonderregeln. Aus demselben Grund entfällt auch der freie Monat für pausierte Creator: Die Staffel ist die einzige Preisregel.</p>
+</div>
+
+<div class="entry">
+  <h4>16. Anmeldeseite eines pausierten Creators bleibt offen — entschieden</h4>
+  <p>Die Liste gehört ihm, auch während er nicht zahlt; Bestätigungsmails werden gezählt und sind gedeckelt. Zusammenfassungsseiten und CSV-Export bleiben ebenfalls erreichbar.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Offen lassen (Abrechnungsplan §12 Frage 13).</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Bleibt offen.</p>
+</div>
+
+<div class="entry">
+  <h4>17. Schwellwerte — entschieden</h4>
+  <p>Zahlungsziel 14 Tage; Vorwarnung 7 Tage vor der Pause; Pause 21 Tage nach Fälligkeit. Bestätigungsmails je Creator und Tag: Warnung ab 500, Sperre ab 2.000 (vor dem Start eines großen Kanals anheben). YouTube-Quota: Warnung bei 70 %, Alarm bei 90 %.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Diese Werte, alle in <code>config/settings.toml</code> (Abrechnungsplan §3).</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Die Werte passen. Bedingung: Jede Zahl steht zentral in <code>config/settings.toml</code>, ist konfigurierbar und trägt eine Zeile Erklärung; ein Test weist einen Schlüssel ohne Erklärung zurück (Abrechnungsplan §3).</p>
+</div>
+
+<div class="entry">
+  <h4>18. Hosting und Mail-Dienst sind dir zu teuer — von dir geparkt — klärst du separat</h4>
+  <p>Rund 27 $ Hosting ab Go-live, dazu 20 $ Mail-Tarif ab der ersten Liste über 100 Fans. Bis zum ersten Piloten fällt nichts davon an, weil alles lokal läuft. Die geprüften Sparhebel stehen mit ihrem Preis im Backlog („Hosting and mail-provider cost review“, „Cheaper bulk mail“).</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Nichts umbauen; die Staffel rechnet mit dem heutigen, teureren Fall. Sinken die Mailkosten, sinken die Stufenpreise.</p>
+  <span class="label">Entschieden am 21.09.2026</span>
+  <p>Du klärst das Thema außerhalb dieses Plans. Bestätigt hast du außerdem: die sieben Stufen wie vorgeschlagen; 5 € laufen auch während einer Pause weiter; ein Stufenwechsel im laufenden Monat wird mit einer kurzen Mail angekündigt; Zahlungsarten sind SEPA-Lastschrift und Karte.</p>
+</div>
+
+<div class="entry open">
+  <h4>19. Gewerbe und Steuernummer — blockiert die erste Rechnung, nicht die Entwicklung</h4>
+  <p>Eine Rechnung braucht deine Steuernummer und den §19-Satz; Stripe schaltet ein Konto erst mit Geschäftsangaben und einer Website frei. Entwickelt und getestet wird vorher in der Stripe-Sandbox.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Steht als Punkt in der M9-Checkliste (Plan §17).</p>
 </div>
