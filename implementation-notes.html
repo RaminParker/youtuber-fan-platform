@@ -60,7 +60,7 @@
 <p class="lede">Wo die Implementierung von der Spezifikation abweicht, sie auslegt oder eine Lücke schließt.</p>
 <p class="meta">Bezug: <code>docs/plans/2026-09-mvp-implementation-plan.md</code> (der Plan) ·
 <code>docs/manifest/creator-plattform-manifest.md</code> (das Manifest, maßgeblich).
-Stand: 20.09.2026 — M6 (Zeitplan, Vorschau, Versand) umgesetzt, live abgenommen und nach einem Code-Review mit 19 Befunden gehärtet: 662 Tests grün, Lint sauber. Davor am selben Tag M5 (Fan-Bereich), per Code-Review geprüft und gehärtet. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
+Stand: 27.09.2026 — Umplanung: Mailversand direkt über Amazon SES statt Resend (Listmonk geprüft und verworfen), LLM-Gateway entfernt, Hosting auf ≈ 11,50 € verschlankt, Betrieb und Ausfallsicherheit (M6c), Design als HTML-Entwurf vor dem Bauen, Produktvideo als letzter Schritt; zwei kritische Gegenprüfungen eingearbeitet. Davor, 20.09.2026: M6 (Zeitplan, Vorschau, Versand) umgesetzt, live abgenommen und nach einem Code-Review mit 19 Befunden gehärtet: 693 Tests grün, Lint sauber. Davor am selben Tag M5 (Fan-Bereich), per Code-Review geprüft und gehärtet. Davor, am 11.09.2026: Planprüfung, M0 bis M4, adversariale Gegenlese, Vereinfachungs-Durchgang.</p>
 
 <div class="toc">
   <strong>Inhalt</strong>
@@ -175,7 +175,7 @@ Jede Entscheidung nennt die Alternative, die sie verdrängt hat.</p>
   teilen. Gleichzeitig ist ein enges IP-Limit falsch, weil viele Fans hinter derselben Mobilfunk-IP sitzen.</p>
   <span class="label">Gewählt</span>
   <p>IP-Limit auf 20/Minute, zusätzlich neue Spalte <code>subscriptions.confirm_sent_at</code> und
-  <code>web.confirm_resend_minutes = 10</code>: höchstens eine Bestätigungsmail pro Adresse und Fenster.
+  <code>web.confirm_resend_minutes = 10</code> (ab M6a <code>web.confirm_cooldown_minutes</code>): höchstens eine Bestätigungsmail pro Adresse und Fenster.
   Kein Redis, kein zweiter Speicher.</p>
 </div>
 
@@ -1046,6 +1046,134 @@ die kein Test mit Fakes erreicht.</p>
   hinterlegt.</p>
 </div>
 
+<h3>Umplanung am 27.09.2026: Mailversand, Hosting, LLM-Gateway, Design, Video</h3>
+<p class="meta">Deine Wünsche, recherchiert gegen Primärquellen (Listmonk-Quellcode v6.2.0, AWS- und Anthropic-Dokumentation,
+Preisseiten der Anbieter, CPython-Quellcode) und danach von zwei unabhängigen, gezielt kritischen Prüfungen gegen den echten Code
+gegengelesen (10 blockierende, 35 wichtige Befunde — alle eingearbeitet). Die Pläne sind entsprechend geändert und mit
+„<em>Changed 2026-09-27</em>“ markiert. Zwei neue Teilpläne: <code>docs/plans/2026-09-ses-migration-plan.md</code> (M6a) und
+<code>docs/plans/2026-09-lean-platform-plan.md</code> (M6b).</p>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">M6a</span><span class="tag">entschieden</span></div>
+  <h4>Resend fliegt restlos raus — Mails gehen direkt an Amazon SES, ohne Listmonk</h4>
+  <p>Resend kostet bei Newslettern ≈ 0,90 $ je 1.000 Mails plus 20 $ Tarif; Amazon SES in Frankfurt ≈ 0,11 $ je
+  1.000, ohne Grundgebühr. Bei 200.000 Mails im Monat: ≈ 22 $ statt ≈ 155 $.</p>
+  <p><strong>Warum nicht Listmonk:</strong> Die Ersparnis kommt allein von SES — Listmonk ist nur eine Verwaltung davor.
+  Im Quellcode zeigte sich: Mails liegen nur im Arbeitsspeicher und gehen bei einem Fehler still verloren; kein Schutz
+  gegen Doppelversand; gesperrte Adressen werden nicht geprüft; ein Videotitel mit <code>{{</code> würde als Code ausgeführt;
+  die Bestätigungsmail kann nicht im Look des Creators erscheinen; Bounces meldet Listmonk nicht weiter; dazu ein
+  zusätzlicher Dienst mit öffentlicher Admin-Oberfläche und sechs Sicherheitslücken in zwei Jahren.</p>
+  <span class="label">Entschieden am 27.09.2026</span>
+  <p>Die App schickt per Python-Standardbibliothek (SMTP) direkt an SES. Bounces, Beschwerden <em>und</em> der Zustellstatus
+  jeder Mail kommen als signierte Nachricht an <code>/webhooks/ses</code>. Lokal fängt <strong>Mailpit</strong> jede Mail ab.
+  <strong>Keine Code-Leichen:</strong> Der Teilplan listet jede Datei und jede Zeile, die Resend betrifft, und am Ende
+  muss ein <code>git grep</code> leer bleiben — sonst ist der Meilenstein nicht fertig. Dieselbe Regel gilt jetzt allgemein
+  (Plan §3, „A removal is complete“).</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">M6a</span><span class="tag">entschieden</span></div>
+  <h4>Was mit SES genauso geht wie mit Resend — und die zwei Kompromisse</h4>
+  <p><strong>Gleich bleibt:</strong> Bestätigungsmail und Login-Link nach der Antwort, Vorschau mit Stopp, Newsletter an alle
+  Fans, Abmelden mit einem Klick (<code>List-Unsubscribe</code>), automatische Sperre bei Bounce und Beschwerde,
+  Test-Adressen (SES-Simulator), klare Betreiber-Fehlermeldungen. <strong>Neu:</strong> der Zustellstatus jeder Mail
+  („zugestellt“, „verzögert“, „gebounct“) steht mit Mailing- und Zustell-ID in unseren Logs — Ersatz für Resends
+  Einzelansicht.</p>
+  <p><strong>Kompromiss 1 — „niemals doppelt“ statt „genau einmal“:</strong> SES kennt keinen Wiederholungsschutz. Jeder
+  Empfänger wird deshalb vor dem Versand in der Datenbank reserviert. Ein Deploy hält den Versand sauber zwischen zwei Mails an;
+  nur ein harter Absturz mitten in einer SMTP-Übergabe kann einen einzigen Fan diese eine Mail verpassen lassen — geloggt,
+  zählbar, nicht abgerechnet; ab vier solchen Fällen in einem Mailing stoppt der Versand für dich. <em>Entschieden am 27.09.2026:
+  lieber keine Doppelmail.</em></p>
+  <p><strong>Kompromiss 2 — Freischaltung:</strong> SES verschickt erst nach einer Prüfung durch AWS an beliebige Adressen
+  („Sandbox“). Die Prüfung braucht die fertige Website; der Antragstext steht im Teilplan. Entwickelt wird bis dahin
+  gegen Mailpit.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">Plan §15.2</span><span class="tag">M6b</span><span class="tag">entschieden</span></div>
+  <h4>Hosting ≈ 11,50 € statt 28 €: Render schlank</h4>
+  <p>Dein Ziel waren ≈ 10 €. Verglichen wurden (netto, Stand 27.09.2026):</p>
+  <div class="wrap"><table>
+    <tr><th>Option</th><th>≈ pro Monat</th><th>Urteil</th></tr>
+    <tr><td><strong>Render schlank</strong>: ein Dienst für Web + Worker, kleinste Postgres, Backup nach Backblaze B2</td><td><strong>≈ 11,50 €</strong></td><td><strong>gewählt</strong> — kein eigener Server, Deploy per <code>git push</code>, verwaltete Datenbank mit Wiederherstellung, kein SSH nötig</td></tr>
+    <tr><td>Eigener Server (netcup VPS 500, Deutschland)</td><td>≈ 7 € (12 Monate) / 8,64 € monatlich</td><td>am günstigsten, aber ~1 Tag Einrichtung und ~15–30 Min. Pflege im Monat; Störungen sind deine. Bleibt der dokumentierte Ausweg.</td></tr>
+    <tr><td>Hetzner</td><td>≈ 6 €</td><td>für Neukunden seit Juni 2026 keine neuen Server bestellbar</td></tr>
+    <tr><td>Render wie bisher (drei Dienste)</td><td>≈ 24 €</td><td>doppelt so teuer ohne Nutzen</td></tr>
+    <tr><td>Railway, Fly.io, Neon, Oracle Free, AWS/Google/Azure, Coolify</td><td>0–60 €</td><td>keine verwaltete Datenbank, zu teuer, unzuverlässig oder zu komplex</td></tr>
+  </table></div>
+  <p>Dafür nötig (Meilenstein M6b): Web und Worker laufen in <em>einem</em> Container, eine Datenbanksperre sorgt dafür, dass bei
+  einem Deploy nie zwei Worker gleichzeitig arbeiten; das tägliche Backup macht der Worker selbst (verschlüsselt, Backblaze B2,
+  kostenlos unter 10 GB). Überwachung kostenlos: UptimeRobot, Healthchecks.io, Sentry (EU). Vor dem Go-live zu prüfen:
+  Renders Bedingungen für gewerbliche Nutzung im Hobby-Tarif, ein Blueprint-Feld, die Log-Aufbewahrung.</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">M6b</span><span class="tag">entschieden</span></div>
+  <h4>Das LLM-Gateway (Bifrost) fällt weg — die App spricht Anthropic direkt an</h4>
+  <p>Anthropic bietet strukturierte JSON-Ausgaben inzwischen offiziell an (<code>output_config.format</code>, ohne
+  Beta-Kennung). Damit braucht es keinen eigenen Gateway-Dienst mehr: ≈ 7 $ im Monat und ein Container weniger. Die Abstraktion
+  im Code, die das Manifest verlangt (<code>LLMGateway</code>), bleibt — nur die Implementierung wechselt. Der
+  Kostendeckel pro Creator und Tag bleibt; bei Anthropic kommt ein Ausgabenlimit für den Arbeitsbereich dazu. Bifrost wird
+  genauso restlos entfernt wie Resend (eigener <code>git grep</code>-Check). <em>Entschieden am 27.09.2026.</em>
+  Das Manifest wird in M6b nachgezogen.</p>
+</div>
+
+<div class="entry">
+  <div class="tags"><span class="tag">Meilenstein D</span><span class="tag">entschieden</span></div>
+  <h4>Das Design entsteht als HTML-Entwurf — ohne bezahltes Design-Werkzeug</h4>
+  <p>Figma kostet für das Arbeiten einen bezahlten Platz (≈ 16–20 $ im Monat); Penpot wäre kostenlos gewesen. Deine Wahl:
+  <strong>HTML-Entwürfe im Browser.</strong> Die Entwürfe sind die echten Seiten und Mails, mit erfundenen Demo-Daten
+  gerendert (<code>uv run app design-preview</code>). Du bekommst je Runde Bildschirmfotos aller Seiten auf Handy- und
+  Desktop-Breite, hell und dunkel, und gibst frei; erst danach wird darauf aufgebaut. Vorteil: Was du freigibst, ist genau
+  das, was online geht — keine zweite Datei, die abweichen kann.</p>
+  <p>Richtung: modern, minimalistisch, warm — Creme, Cappuccino, Mokka; eine Schriftfamilie und eine Akzentfarbe (Manifest
+  §5.5), Schrift selbst gehostet (Google Fonts von Googles Servern sind in Deutschland ein DSGVO-Risiko). Drei Runden:
+  Grundlagen → Kernseiten → Rest. Der Meilenstein D kommt nach M6c und vor M7, damit Einstellungs- und
+  Abrechnungsseite gleich im neuen Look entstehen und nichts zweimal gebaut wird. Deine Rückmeldungen und Freigaben stehen
+  in der Tabelle unten („Design-Review“).</p>
+</div>
+
+<div class="entry">
+  <div class="tags"><span class="tag">Meilenstein M10</span><span class="tag">entschieden</span></div>
+  <h4>Der letzte Schritt: ein Produktvideo, 60–90 Sekunden, Text und Musik</h4>
+  <p>Animiert im freigegebenen Design, mit echten Bildschirmen der Plattform (Demo-Daten, keine echten Personen),
+  ohne Stimme — funktioniert damit auch stumm in sozialen Netzen. Zwei Formate: 16:9 für die Website, 9:16 für
+  Shorts/Reels. Gebaut mit Remotion (kostenlos bis drei Mitarbeiter), Musik von Pixabay (vor YouTube-Uploads auf
+  Content-ID-Ansprüche prüfen). Farben, Schrift, Produktname und Einstiegspreis kommen automatisch aus den Einstellungen,
+  damit das Video nie vom Stand der Website abweicht. Auf der Website selbst gehostet statt als YouTube-Einbettung. Ein
+  Storyboard mit deutschen Texten steht im Plan (§17 M10).</p>
+</div>
+
+<div class="entry important">
+  <div class="tags"><span class="tag important">wichtig</span><span class="tag">M6c</span><span class="tag">neu</span></div>
+  <h4>Betrieb: souverän bei Ausfällen, du siehst alles, Deploys nur im sicheren Moment</h4>
+  <p>Dein Wunsch vom 27.09.: Die Plattform soll mit Abstürzen souverän umgehen, alles loggen und dir alle relevanten Infos sofort, einfach und sicher zeigen — auch wann die nächsten Zusammenfassungen und Mails anstehen, damit du nicht mitten hinein deployst. Neuer Meilenstein <strong>M6c</strong> (<code>docs/plans/2026-09-operations-plan.md</code>), direkt nach M6b:</p>
+  <ul>
+    <li><strong>Ausfalltabelle:</strong> Für jeden Fall (Absturz, Speicher voll, Datenbank weg, SES/Anthropic/YouTube gestört, Render-Ausfall, Backup kaputt, Deploy während Versand …) steht, was die Plattform tut, was du siehst und was du tun musst — mit Test oder Probelauf.</li>
+    <li><strong>Betreiber-Konsole <code>/betrieb</code>:</strong> Ampel je Komponente, was gerade läuft (z. B. „Versand 1.234 von 5.000, noch ≈ 5 Min.“), deployte Version, <strong>Zeitplan der nächsten 7 Tage</strong> (Zusammenfassungen, Vorschauen, Versände mit Empfängerzahl und Dauer), offene Probleme, die <strong>ruhigen Zeitfenster</strong> für Deploys. Passwortgeschützt; funktioniert auch, wenn der Mailversand gestört ist.</li>
+    <li><strong>Tägliche Betreiber-Mail um 07:00:</strong> Tagesplan, sichere Deploy-Fenster, offene Probleme, Zahlen von gestern. Bei Problemen, die nur du lösen kannst, kommt sofort eine Mail.</li>
+    <li><strong>Unabhängige Alarmwege:</strong> UptimeRobot, Healthchecks.io, Sentry, AWS und GitHub melden sich auch dann, wenn die Plattform selbst nicht mehr senden kann.</li>
+    <li><strong>Deploys sind jederzeit sicher — so gebaut:</strong> Der Versand hält zwischen zwei Mails an und macht im neuen Container weiter, niemand bekommt eine Mail doppelt; eine laufende Zusammenfassung wird fertig. Render deployt nur noch, wenn die Tests grün sind. Die ruhigen Zeitfenster zeigen Konsole und Tagesmail trotzdem. Ein Workflow, der vor jedem Deploy auf ein Fenster wartet, war geplant und ist <em>gestrichen</em>: drei Secrets, ein stundenlang wartender Job, und er hätte sogar ungetestete Commits ausliefern können — für den Gewinn von einer Minute Verzögerung.</li>
+    <li><strong>Notstopp:</strong> Ein Knopf in der Konsole stoppt jeden Versand vor der nächsten Mail — ohne Deploy, ohne Neustart (ein Schalter in der Datenbank, den der Versand vor jeder Mail liest). Danach entscheidest du pro Mailing: „fortsetzen“ oder „Rest abbrechen“. Für den Tag, an dem ein Fehler falsche Inhalte verschicken würde.</li>
+    <li><strong>Web und Worker in einem Container, klug entkoppelt:</strong> Stürzt der Worker ab, startet er neu (nach 10 s, bei wiederholtem Absturz mit wachsender Pause bis 5 min), ohne dass die Website ausfällt. Du erfährst davon über die Problemliste. Das Start-Skript wurde in der Docker-Umgebung des Projekts getestet.</li>
+  </ul>
+  <span class="label">Offen gesagt — die Grenzen des günstigen Aufbaus</span>
+  <p>Es gibt nur eine Instanz: Bei einem Absturz, Neustart oder Deploy-Wechsel ist die Seite Sekunden bis etwa eine Minute nicht erreichbar. Echte Ausfallsicherheit mit zwei Instanzen und hochverfügbarer Datenbank kostet ab ≈ 60 € im Monat — vor den ersten Einnahmen nicht sinnvoll (im Backlog mit Auslöser). Render hält Logs im Hobby-Tarif nur 7 Tage; was zählt, steht deshalb 180 Tage in der Datenbank.</p>
+</div>
+
+<div class="entry">
+  <div class="tags"><span class="tag">Plan §3.1, §17</span><span class="tag">neu</span></div>
+  <h4>Austauschbar, zentral konfiguriert, wartbar — als Regel mit Prüfung</h4>
+  <p>Jede externe Komponente (LLM, Prompts, Mail, Transkripte, Quellen, Datenbank, Hosting, Backup, Überwachung, Zahlung, Design) sitzt hinter genau einem Modul, wird an einer Stelle gebaut (<code>services.py</code>) und zentral konfiguriert; die Tabelle in Plan §3.1 sagt für jede, was ein Austausch kostet. Bewusst <em>keine</em> Abstraktionsschicht für alles — eine Schnittstelle mit nur einer Umsetzung macht Code schwerer wartbar, nicht leichter. Ehrlich: PostgreSQL selbst ist eine bewusste Wahl; ein anderer Datenbanktyp wäre eine echte Migration. Ein Test schlägt fehl, sobald ein Anbieter-Detail außerhalb seines Moduls auftaucht. Jeder Meilenstein hat eine feste <strong>Definition of Done</strong> (Plan §17): Tests, Prüfungen, Durchsicht auf toten Code, Doku, Plan-Status, Backlog — damit der rote Faden nie reißt.</p>
+</div>
+
+<h3 id="design-review">Design-Review (Meilenstein D)</h3>
+<p class="meta">Wird ab dem Kick-off von D gefüllt: je Runde und Seite dein Kommentar, was sich geändert hat, und die Freigabe mit Datum.</p>
+<div class="wrap"><table>
+  <tr><th>Runde</th><th>Seite / Zustand</th><th>Dein Kommentar</th><th>Änderung</th><th>Status</th></tr>
+  <tr><td colspan="5" class="status-empty">noch keine Einträge</td></tr>
+</table></div>
+
 <h2 id="abweichungen">3. Abweichungen vom Plan</h2>
 <p class="meta">Bewusste Abweichungen von der Spezifikation, mit Begründung.</p>
 
@@ -1335,6 +1463,7 @@ jeweils genannten Standard weiter.</p>
 
 <div class="entry">
   <h4>11. Entsperren ist Handarbeit — entschieden: ja, für den MVP</h4>
+  <p><em>Aktualisiert am 27.09.2026:</em> Mit SES heißt der Handgriff: Adresse in der SES-Konsole von der Sperrliste nehmen, dann die SQL-Zeile (<code>docs/runbooks/operations.md</code>, ab M6a). Bei einer Beschwerde nie.</p>
   <p>Mit dauerhaften Sperren braucht ein Fan, dessen Postfach wieder funktioniert, den Betreiber: Adresse in Resend von
   der Sperrliste nehmen, dann eine SQL-Zeile (ARCHITECTURE.md). Das trifft nur hart gebouncte Adressen, die später
   wieder existieren — selten. Ein Runbook-Eintrag dafür steht in M7.</p>
@@ -1345,6 +1474,7 @@ jeweils genannten Standard weiter.</p>
 
 <div class="entry">
   <h4>12. Getrennte Resend-Keys pro Umgebung, der Produktions-Key auf die Domain beschränkt — entschieden: ja</h4>
+  <p><em>Überholt am 27.09.2026:</em> Resend wird durch Amazon SES ersetzt. Der Grundsatz bleibt: je Umgebung ein eigener, reiner Versand-Zugang — bei SES ein IAM-Nutzer, der nur von der eigenen Domain senden darf (SES-Plan §9 Schritt 7).</p>
   <p>Heute gibt es einen Resend-Key (dein „Sending access"-Key in der lokalen <code>.env</code>). Er darf von jeder
   Domain deines Kontos senden. Das ist für die Entwicklung richtig.</p>
   <p>Für den Betrieb auf Render (M9) schlage ich zwei Dinge vor, beide im Resend-Dashboard, ohne Code:</p>
@@ -1404,7 +1534,8 @@ jeweils genannten Standard weiter.</p>
 </div>
 
 <div class="entry">
-  <h4>18. Hosting und Mail-Dienst sind dir zu teuer — von dir geparkt — klärst du separat</h4>
+  <h4>18. Hosting und Mail-Dienst sind dir zu teuer — entschieden am 27.09.2026</h4>
+  <p><em>Entschieden am 27.09.2026:</em> Mail über Amazon SES (≈ 0,11 $ je 1.000, keine Grundgebühr), Hosting auf Render verschlankt (≈ 11,50 € im Monat) — siehe „Umplanung am 27.09.2026“ oben. Die unten genannten Backlog-Einträge sind damit erledigt.</p>
   <p>Rund 27 $ Hosting ab Go-live, dazu 20 $ Mail-Tarif ab der ersten Liste über 100 Fans. Bis zum ersten Piloten fällt nichts davon an, weil alles lokal läuft. Die geprüften Sparhebel stehen mit ihrem Preis im Backlog („Hosting and mail-provider cost review“, „Cheaper bulk mail“).</p>
   <span class="label">Standard bis zu deiner Antwort</span>
   <p>Nichts umbauen; die Staffel rechnet mit dem heutigen, teureren Fall. Sinken die Mailkosten, sinken die Stufenpreise.</p>
@@ -1417,4 +1548,49 @@ jeweils genannten Standard weiter.</p>
   <p>Eine Rechnung braucht deine Steuernummer und den §19-Satz; Stripe schaltet ein Konto erst mit Geschäftsangaben und einer Website frei. Entwickelt und getestet wird vorher in der Stripe-Sandbox.</p>
   <span class="label">Standard bis zu deiner Antwort</span>
   <p>Steht als Punkt in der M9-Checkliste (Plan §17).</p>
+</div>
+
+<div class="entry open">
+  <h4>20. AWS-Konto anlegen — blockiert die Entwicklung nicht</h4>
+  <p>Für SES brauchst du ein AWS-Konto (Root-Zugang mit MFA, ein Budget-Alarm bei 10 €). Die Entwicklung von M6a läuft komplett gegen Mailpit; das Konto brauchen wir erst für den Live-Test und spätestens in M9. Die Schritte stehen im SES-Plan §9.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Du legst es an, sobald die Domain feststeht (Frage 21).</p>
+</div>
+
+<div class="entry open">
+  <h4>21. Domain und DNS-Anbieter — die Weiche für alles ab dem Go-live</h4>
+  <p><em>Ergänzt am 27.09.2026:</em> Von der Domain hängen ab: der SES-Absender (DNS-Einträge, bis zu 72 h Prüfzeit), die Google-OAuth-Prüfung, der Go-live, der Produktname im Design und das Video. M6a, M6b und D warten <em>nicht</em> darauf; sobald du entschieden hast, laufen die externen Schritte (AWS, B2, Überwachung) parallel an (Plan §17 M9, erster Block).</p>
+  <p>SES braucht DNS-Einträge auf der echten Domain (drei DKIM-Einträge, einen MX- und einen SPF-Eintrag für die Bounce-Adresse, DMARC). Auch das Video (M10) zeigt den endgültigen Namen und die Domain. Frage: Bei welchem Anbieter liegt bzw. läge die Domain, und hast du dort Zugriff auf die DNS-Einträge?</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Entwicklung ohne Domain (Mailpit); die DNS-Schritte warten auf deine Entscheidung.</p>
+</div>
+
+<div class="entry open">
+  <h4>22. Sollen die Staffelpreise der gesunkenen Mailkost folgen?</h4>
+  <p>Die Staffel wurde gegen ≈ 0,90 $ je 1.000 Mails gerechnet. Mit SES sinken unsere Kosten an der Obergrenze jeder Stufe deutlich — Stufe S von ≈ 2 € auf ≈ 0,70 €, die größte Stufe von ≈ 157 € auf ≈ 22 € im Monat (Abrechnungsplan §1, neue Spalte). Am 21.09. hattest du als Standard festgelegt: „Sinken die Mailkosten, sinken die Stufenpreise.“</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Die bestätigte Staffel bleibt unverändert, bis du entscheidest. Möglich sind: Preise senken (mehr Creator, gleicher Deckungsbeitrag pro Kopf), Preise halten (schnellere Deckung der Fixkosten — mit ≈ 11,50 € Hosting reichen dafür etwa drei kleine Creator statt zehn), oder nur die großen Stufen senken.</p>
+</div>
+
+<div class="entry open">
+  <h4>23. Die Beispielmail auf der Verkaufsseite — echt, mit Zustimmung des Piloten</h4>
+  <p>Das Manifest (§5.5) verlangt eine <em>echte</em> Beispielmail; die im Repository ist erfunden (Frage 8). Figma ist gestrichen — dafür gilt jetzt: Design-Entwürfe und Video zeigen nur erfundene Demo-Daten, die Verkaufsseite aber eine echte Mail.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Ein <code>cli demo-mails</code>-Schnappschuss eines Pilot-Videos, mit schriftlicher Zustimmung des Piloten (M8); bis dahin die erfundene, gekennzeichnet als „Beispiel“.</p>
+</div>
+
+<div class="entry open">
+  <h4>24. Wo die Video-Masterdateien liegen</h4>
+  <p>Die Web-Fassung (≤ 10 MB) liegt im Repository; die Master (≈ 100–300 MB) gehören nicht in Git.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Dein eigener Cloud-Speicher.</p>
+</div>
+
+<div class="entry open">
+  <h4>25. Öffnungsraten ohne Öffnungs-Tracking — entschieden</h4>
+  <p>Das Manifest (§6.3) nennt „Öffnungsraten deutlich über dem Newsletter-Durchschnitt“ als Erfolgskriterium. Mit SES gibt es ohne Tracking-Pixel keine Öffnungsrate — und das Pixel kostet Datenschutz (Hinweis in der Datenschutzerklärung) und etwas Zustellbarkeit.</p>
+  <span class="label">Standard bis zu deiner Antwort</span>
+  <p>Kein Tracking. Das Kriterium wird durch eines ohne personenbezogene Daten ersetzt — Besuche der Zusammenfassungsseite, die über den Link „Online ansehen“ aus der Mail kommen, gezählt pro Video ohne personenbezogene Daten (gebaut in M7) — und so ins Manifest übernommen (M6b).</p>
+  <span class="label">Entschieden am 27.09.2026</span>
+  <p>Einverstanden: kein Tracking, Zähler für Besuche über „Online ansehen“ pro Video (gebaut in M7, sichtbar in Konsole, Betreiber-Mail und <code>cli status</code>). Gezählt wird erst, wenn die Seite im Browser wirklich geladen wurde — die Link-Scanner von Gmail und Outlook, die jeden Link in einer Mail vorab abrufen, zählen so meist nicht mit. Die Zahl bleibt eine Schätzung (ein Neuladen zählt erneut) und ist überall so beschriftet.</p>
 </div>
